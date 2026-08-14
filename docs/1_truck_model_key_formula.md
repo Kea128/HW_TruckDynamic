@@ -38,7 +38,7 @@
 | \(d_1\) | 卡车质心到铰接点的向后距离 | \(\mathrm m\) |
 | \(a_2,b_2\) | 拖车质心到铰接点、拖车轴距离 | \(\mathrm m\) |
 | \(C_{1f},C_{1r},C_{2r}\) | 三个整轴侧偏刚度 | \(\mathrm{N/rad}\) |
-| \(U_1\) | 精确运动学中卡车后轴中心的前向速度 | \(\mathrm{m/s}\) |
+| \(U_1,U_2\) | 卡车、拖车沿各自车体前向的实际纵向速度分量；纯滚动运动学以 \(U_1\) 为输入 | \(\mathrm{m/s}\) |
 | \(U\) | 线性动力学中两车直线平衡点的共同恒定名义纵速 | \(\mathrm{m/s}\) |
 | \(\delta\) | 卡车前轮转角 | \(\mathrm{rad}\) |
 | \(H\) | 拖车作用于卡车的铰接横向力 | \(\mathrm N\) |
@@ -48,13 +48,24 @@
 \[
 \boxed{
 L_1=a_1+b_1,\qquad
-L_2=a_2+b_2,\qquad
-\ell_h=b_1-d_1.
+L_2=a_2+b_2.
 }
 \tag{K1}
 \]
 
 ### 1.3 模型层次
+
+用 \(\varepsilon\) 统一表示小量阶次，并以 \(\rho\) 和
+\(\dot\rho=d\rho/dt\) 表示第 7 章定义的参考曲率及其时间变化率。
+在线性模型中假设
+\[
+\delta,\ \phi,\ \alpha,\ 
+\frac{v_{y1}}U,\ \frac{v_{y2}}U,\ 
+\frac{L_1r_1}U,\ \frac{L_2r_2}U,\ 
+L_1\rho,\ L_2\rho,\ 
+\frac{L_1^2\dot\rho}{U},\ \frac{L_2^2\dot\rho}{U}
+=O(\varepsilon).
+\]
 
 1. **非线性运动学**：纯滚动，以卡车后轴前向速度 \(U_1\) 为输入，可保留
    \(\tan\delta,\sin\phi,\cos\phi\)；
@@ -97,7 +108,7 @@ v_{P_h,x1}\\v_{P_h,y1}
 \end{bmatrix}
 =
 \begin{bmatrix}
-U_1\\\ell_hr_1
+U_1\\(b_1-d_1)r_1
 \end{bmatrix}.
 }
 \tag{K4}
@@ -108,18 +119,18 @@ U_1\\\ell_hr_1
 \[
 \boxed{
 \begin{aligned}
-\dot X_h&=U_1\cos\theta_1-\ell_hr_1\sin\theta_1,\\
-\dot Y_h&=U_1\sin\theta_1+\ell_hr_1\cos\theta_1,\\
+\dot X_h&=U_1\cos\theta_1-(b_1-d_1)r_1\sin\theta_1,\\
+\dot Y_h&=U_1\sin\theta_1+(b_1-d_1)r_1\cos\theta_1,\\
 \dot\theta_1&=r_1,\\
 \dot\theta_2&=
-\frac{U_1\sin\phi+\ell_hr_1\cos\phi}{L_2},\\
+\frac{U_1\sin\phi+(b_1-d_1)r_1\cos\phi}{L_2},\\
 \dot\phi&=
-r_1-\frac{U_1\sin\phi+\ell_hr_1\cos\phi}{L_2}.
+r_1-\frac{U_1\sin\phi+(b_1-d_1)r_1\cos\phi}{L_2}.
 \end{aligned}}
 \tag{K5}
 \]
 
-当铰接点位于卡车后轴中心，即 \(d_1=b_1,\ell_h=0\)：
+当铰接点位于卡车后轴中心，即 \(d_1=b_1\)：
 
 \[
 \boxed{
@@ -134,7 +145,7 @@ r_1-\frac{U_1\sin\phi+\ell_hr_1\cos\phi}{L_2}.
 \]
 
 精确运动学中，拖车轴沿自身前向的速度为
-\(U_2=U_1\cos\phi-\ell_hr_1\sin\phi\)，一般不等于 \(U_1\)。
+\(U_2=U_1\cos\phi-(b_1-d_1)r_1\sin\phi\)，一般不等于 \(U_1\)。
 在线性横向动力学中，二者在直线平衡点附近满足
 \(U_1=U_2=U+O(\varepsilon^2)\)，因此后文统一使用名义纵速 \(U\)。
 
@@ -537,13 +548,25 @@ a_{i4}&=C_{2r}(-q_{i1}+d_1q_{i2}+L_2q_{i3}),\\
 
 ## 7. 六状态路径误差模型
 
-令时间参考点 \(\boldsymbol p_{\mathrm{ref}}(t)\) 以速度 \(U\) 沿参考切向运动，
-\(\boldsymbol n_{\mathrm{ref}}\) 为参考左向单位向量。横向误差以卡车质心为参考：
+令 \(\boldsymbol p_{O_1}\) 为卡车质心的全局位置。时间参考点
+\(\boldsymbol p_{\mathrm{ref}}(t)\) 以速度 \(U\) 沿参考切向
+\(\boldsymbol t_{\mathrm{ref}}\) 运动；参考切向航向为
+\(\theta_{\mathrm{ref}}\)，参考左向单位向量为
+\(\boldsymbol n_{\mathrm{ref}}\)。定义纵向、横向匹配误差：
 \[
+e_x=\boldsymbol t_{\mathrm{ref}}^T
+\left(\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}}\right),
+\qquad
 e_y=\boldsymbol n_{\mathrm{ref}}^T
 \left(\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}}\right).
 \]
-这里忽略纵向匹配误差，采用时间参数化的小误差模型，而不是严格最近点 Frenet 模型。
+精确求导包含
+\[
+\dot e_y=-U\rho e_x+U\sin e_\psi+v_{y1}\cos e_\psi.
+\]
+本文六状态模型明确采用纵向匹配假设 \(e_x\equiv0\)，再对
+\(e_\psi,v_{y1}/U\) 作一阶线性化；因此它是时间参数化的小误差模型，而不是严格最近点
+Frenet 模型。
 定义左转为正的参考曲率 \(\rho=\rho(t)\in C^1\)，
 \(\dot\rho=d\rho/dt\)。于是：
 

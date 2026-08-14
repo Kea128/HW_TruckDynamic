@@ -26,6 +26,18 @@
 - 忽略纵向驱动/制动力对横向子系统的一阶作用；
 - 忽略轮胎饱和、载荷转移、车身侧倾、空气侧力和大铰接角。
 
+用 \(\varepsilon\) 统一记录小量阶次，并以 \(\rho\) 和
+\(\dot\rho=d\rho/dt\) 表示后文定义的参考曲率及其时间变化率。
+在线性模型中：
+\[
+\delta,\ \phi,\ \alpha,\ 
+\frac{v_{y1}}U,\ \frac{v_{y2}}U,\ 
+\frac{L_1r_1}U,\ \frac{L_2r_2}U,\ 
+L_1\rho,\ L_2\rho,\ 
+\frac{L_1^2\dot\rho}{U},\ \frac{L_2^2\dot\rho}{U}
+=O(\varepsilon).
+\]
+
 因此，本文不是任意工况下的全非线性平面动力学；由于线性轮胎公式含有 \(1/U\)，
 模型也不适用于 \(U\to0\) 或倒车工况。
 
@@ -133,14 +145,13 @@ r_2=\dot\theta_2.
 \[
 \boxed{
 L_1=a_1+b_1,\qquad
-L_2=a_2+b_2,\qquad
-\ell_h=b_1-d_1.
+L_2=a_2+b_2.
 }
 \tag{D7}
 \]
 
-\(\ell_h\) 是卡车后轴中心到铰接点的有符号前向距离。当 \(d_1=b_1\) 时，
-\(\ell_h=0\)，铰接点与卡车后轴中心重合。
+\(b_1-d_1\) 是卡车后轴中心到铰接点的有符号前向距离。当 \(d_1=b_1\) 时，
+该距离为零，铰接点与卡车后轴中心重合。
 
 ### 2.3 质量、惯量和轮胎参数
 
@@ -149,7 +160,8 @@ L_2=a_2+b_2,\qquad
 - \(a_1,b_1,d_1,a_2,b_2\)：几何长度，单位 \(\mathrm m\)；
 - \(C_{1f},C_{1r},C_{2r}>0\)：三个整轴侧偏刚度，单位
   \(\mathrm{N/rad}\)；
-- \(U_1>0\)：精确运动学中卡车后轴中心的前向速度；
+- \(U_1,U_2>0\)：卡车、拖车沿各自车体前向的实际纵向速度分量；纯滚动运动学以
+  \(U_1\) 为输入；
 - \(U>0\)：线性动力学中两车直线平衡点的共同恒定名义纵速；
 - \(\delta\)：卡车前轮转角，单位 \(\mathrm{rad}\)。
 
@@ -248,7 +260,7 @@ r_1=\frac{U_1}{L_1}\tan\delta.
 \[
 \boxed{
 \boldsymbol p_{P_h}
-=\boldsymbol p_{R_1}+\ell_h\boldsymbol e_{x1}.
+=\boldsymbol p_{R_1}+(b_1-d_1)\boldsymbol e_{x1}.
 }
 \tag{D16}
 \]
@@ -258,8 +270,8 @@ r_1=\frac{U_1}{L_1}\tan\delta.
 \[
 \begin{aligned}
 \boldsymbol v_{P_h}
-&=\boldsymbol v_{R_1}+\ell_hr_1\boldsymbol e_{y1}\\
-&=U_1\boldsymbol e_{x1}+\ell_hr_1\boldsymbol e_{y1}.
+&=\boldsymbol v_{R_1}+(b_1-d_1)r_1\boldsymbol e_{y1}\\
+&=U_1\boldsymbol e_{x1}+(b_1-d_1)r_1\boldsymbol e_{y1}.
 \end{aligned}
 \tag{D17}
 \]
@@ -270,8 +282,8 @@ r_1=\frac{U_1}{L_1}\tan\delta.
 \boxed{
 \boldsymbol v_{P_h}=
 \begin{bmatrix}
-U_1\cos\theta_1-\ell_hr_1\sin\theta_1\\
-U_1\sin\theta_1+\ell_hr_1\cos\theta_1
+U_1\cos\theta_1-(b_1-d_1)r_1\sin\theta_1\\
+U_1\sin\theta_1+(b_1-d_1)r_1\cos\theta_1
 \end{bmatrix}.
 }
 \tag{D18}
@@ -281,9 +293,9 @@ U_1\sin\theta_1+\ell_hr_1\cos\theta_1
 
 \[
 \boxed{
-\dot X_h=U_1\cos\theta_1-\ell_hr_1\sin\theta_1,
+\dot X_h=U_1\cos\theta_1-(b_1-d_1)r_1\sin\theta_1,
 \quad
-\dot Y_h=U_1\sin\theta_1+\ell_hr_1\cos\theta_1.
+\dot Y_h=U_1\sin\theta_1+(b_1-d_1)r_1\cos\theta_1.
 }
 \tag{D19}
 \]
@@ -327,7 +339,7 @@ U_1\sin\theta_1+\ell_hr_1\cos\theta_1
 \[
 \boldsymbol e_{y2}^T\boldsymbol v_{P_h}
 =U_1\boldsymbol e_{y2}^T\boldsymbol e_{x1}
-+\ell_hr_1\boldsymbol e_{y2}^T\boldsymbol e_{y1}.
++(b_1-d_1)r_1\boldsymbol e_{y2}^T\boldsymbol e_{y1}.
 \tag{D24}
 \]
 
@@ -366,13 +378,13 @@ U_1\sin\theta_1+\ell_hr_1\cos\theta_1
 于是：
 
 \[
-L_2r_2=U_1\sin\phi+\ell_hr_1\cos\phi.
+L_2r_2=U_1\sin\phi+(b_1-d_1)r_1\cos\phi.
 \tag{D27}
 \]
 
 \[
 \boxed{
-r_2=\frac{U_1\sin\phi+\ell_hr_1\cos\phi}{L_2}.
+r_2=\frac{U_1\sin\phi+(b_1-d_1)r_1\cos\phi}{L_2}.
 }
 \tag{D28}
 \]
@@ -381,7 +393,7 @@ r_2=\frac{U_1\sin\phi+\ell_hr_1\cos\phi}{L_2}.
 \(\boldsymbol v_{R_2}=\boldsymbol v_{P_h}-L_2r_2\boldsymbol e_{y2}\) 可得
 \[
 U_2=\boldsymbol e_{x2}^T\boldsymbol v_{R_2}
-=U_1\cos\phi-\ell_hr_1\sin\phi.
+=U_1\cos\phi-(b_1-d_1)r_1\sin\phi.
 \]
 因此精确非线性运动学中一般 \(U_2\ne U_1\)。在后续小角度线性化中，
 \(U_2-U_1\) 为二阶小量，才可令 \(U_1=U_2=U\)。
@@ -393,7 +405,7 @@ U_2=\boldsymbol e_{x2}^T\boldsymbol v_{R_2}
 \tag{D29}
 \]
 
-所以得到关键公式文档式 (K5)。当 \(\ell_h=0\) 时立即得到式 (K6)。
+所以得到关键公式文档式 (K5)。当 \(d_1=b_1\) 时立即得到式 (K6)。
 
 ---
 
@@ -728,7 +740,8 @@ v_{y2}+a_2r_2
 \tag{D56}
 \]
 
-在线性横向模型中，\(v_y/U,Lr/U,\phi\) 都是一阶小量，且
+按照第 1 章的小量约定，
+\(v_{y1}/U,v_{y2}/U,L_1r_1/U,L_2r_2/U,\phi=O(\varepsilon)\)，且
 \(U_1=U_2=U+O(\varepsilon^2)\)。保留一阶项：
 
 \[
@@ -1482,6 +1495,8 @@ B_p=
 \]
 其左向单位向量记为 \(\boldsymbol e_{y,\mathrm{ref}}\)。以卡车质心为误差参考点，定义：
 
+- \(e_x=\boldsymbol e_{x,\mathrm{ref}}^T
+  (\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}})\)：纵向匹配误差；
 - \(e_y=\boldsymbol e_{y,\mathrm{ref}}^T
   (\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}})\)：卡车质心相对时间参考点的左向横向误差；
 - \(\theta_{\mathrm{ref}}\)：按时间给定的参考航向；
@@ -1498,8 +1513,8 @@ B_p=
 \tag{D114}
 \]
 
-这里忽略纵向匹配误差，因此不是严格最近点 Frenet 模型。严格 Frenet 模型还会包含
-\(\dot s\) 和 \(1-\rho e_y\) 等项。若曲率按弧长给出为
+本文六状态模型明确采用纵向匹配假设 \(e_x\equiv0\)，因此不是严格最近点 Frenet
+模型。严格 Frenet 模型还会包含 \(\dot s\) 和 \(1-\rho e_y\) 等项。若曲率按弧长给出为
 \(\rho(t)=\kappa(s(t))\)，并取 \(\dot s=U\)，则
 \(\dot\rho=U\kappa'(s)\)；仅在直线或固定半径圆弧上才有 \(\dot\rho=0\)。
 
@@ -1512,11 +1527,18 @@ B_p=
 \tag{D115}
 \]
 
-在小航向误差下，将该速度投影到参考轨迹左向，可得：
+由于
+\(\dot{\boldsymbol e}_{y,\mathrm{ref}}
+=-U\rho\boldsymbol e_{x,\mathrm{ref}}\)，对 \(e_y\) 求导得到：
 
 \[
-\dot e_y=U\sin e_\psi+v_{y1}\cos e_\psi
-\approx v_{y1}+Ue_\psi.
+\begin{aligned}
+\dot e_y
+&=-U\rho e_x+U\sin e_\psi+v_{y1}\cos e_\psi\\
+&=U\sin e_\psi+v_{y1}\cos e_\psi
+\qquad(e_x=0)\\
+&\approx v_{y1}+Ue_\psi.
+\end{aligned}
 \tag{D116}
 \]
 
