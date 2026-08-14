@@ -5,6 +5,9 @@
 中的全部关键公式。推导只使用二维位置、二维速度和标量偏航力矩；所有向量、矩阵和
 自定义符号均在使用前完整定义。
 
+可视化验证报告见
+[最新推导验证 Canvas](https://cursor.com/dashboard/shared-canvases?shareId=canvas--dwF_B4CCAInb-mDcQVwzHpy)。
+
 ---
 
 ## 1. 推导目标与模型边界

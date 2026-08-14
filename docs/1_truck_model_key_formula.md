@@ -7,6 +7,9 @@
 更详细的逐式推导见
 [`2_truck_model_derivation.md`](2_truck_model_derivation.md)。
 
+可视化验证报告见
+[最新推导验证 Canvas](https://cursor.com/dashboard/shared-canvases?shareId=canvas--dwF_B4CCAInb-mDcQVwzHpy)。
+
 ---
 
 ## 1. 坐标、符号和假设
