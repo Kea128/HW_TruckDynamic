@@ -1,19 +1,22 @@
 # 重卡铰接角多速率时延融合（Delayed EKF）交接说明
 
-本文是**可冻结的实车方案说明书**，供其他工作区把本仓库里已经验证的
-Delayed EKF **原样移植**到量产/实车工程。车辆几何与横向动力学以
-[`1_truck_model_key_formula.md`](1_truck_model_key_formula.md) 为准；本文只补
-**铰接角观测、时延、滤波、接口与验证**。不要另起一套状态或过程模型，除非本文
-第 11 节明确列出的已知限制被新数据推翻。
+本文是**可冻结的实车方案说明书**：状态、过程/量测模型、时延补偿步骤、调参与验收
+以本文为准。车辆几何与横向动力学以
+[`1_truck_model_key_formula.md`](1_truck_model_key_formula.md) 为准。
 
-实现源：
+**目标工作区已经有一套较完善的 EKF 实现类。本次移植必须在该类上做功能扩充，
+禁止再拷贝或重写一套卡尔曼核。** 本仓库的 `ArticulationEstimator` 只是算法对照
+（\(f,F,Q,h,H,R\)、门限、历史重传播怎么调用已有 `predict/update`），不是要落地的
+类层次。不要另起状态或过程模型，除非第 11 节的已知限制被新数据推翻。
+
+对照实现（算法，不是拷贝目标）：
 
 | 角色 | 路径 |
 |---|---|
-| 滤波器（唯一算法源） | [`include/truck_model/articulation_estimator.hpp`](../include/truck_model/articulation_estimator.hpp)、[`src/articulation_estimator.cpp`](../src/articulation_estimator.cpp) |
+| 算法对照 | [`include/truck_model/articulation_estimator.hpp`](../include/truck_model/articulation_estimator.hpp)、[`src/articulation_estimator.cpp`](../src/articulation_estimator.cpp) |
 | Demo 雷达时延仿真与闭环接线 | [`examples/mpc_demo/demo_session.cpp`](../examples/mpc_demo/demo_session.cpp) |
 | 运行记录 | [`examples/mpc_demo/session_log.cpp`](../examples/mpc_demo/session_log.cpp) |
-| 单测 | [`tests/test_articulated_vehicle.cpp`](../tests/test_articulated_vehicle.cpp)（`testDelayedEkfCompensatesLidarLatency` 等）、[`tests/test_mpc_demo.cpp`](../tests/test_mpc_demo.cpp) |
+| 验收用例（应在目标仓用已有 EKF 复现） | [`tests/test_articulated_vehicle.cpp`](../tests/test_articulated_vehicle.cpp)、[`tests/test_mpc_demo.cpp`](../tests/test_mpc_demo.cpp) |
 
 **内部一律 SI：角度 rad，角速度 rad/s，速度 m/s，时间 s。** UI 上的度只是显示换算。
 
@@ -35,11 +38,80 @@ Delayed EKF **原样移植**到量产/实车工程。车辆几何与横向动力
 
 **判定：滤波结果尚可，本方案冻结，作为其他工作区最终开发的基准。**
 
-移植时三条硬约束：
+移植时四条硬约束：
 
-1. `historyHorizon` **必须严格大于**最大雷达时延（建议 \(\tau_{\max}+\Delta t_{\mathrm{ctrl}}\)）。默认 0.4 s 只刚好覆盖 400 ms；若注入到 0.5 s，大于 0.4 s 的量测会被丢弃（见第 9 节 `20260921_153719`）。
+0. **复用目标仓已有 EKF 类**（预测、更新、协方差、若已有则含 Joseph / 马氏门限）。只新增铰接角模型、输入、迟到量测的历史重传播外壳。禁止第二套 `KalmanFilter` / `ArticulationEstimator` 滤波核。
+1. `historyHorizon` **必须严格大于**最大雷达时延（建议 \(\tau_{\max}+\Delta t_{\mathrm{ctrl}}\)）。本对照实现默认 0.4 s 只刚好覆盖 400 ms；若注入到 0.5 s，大于 0.4 s 的量测会被丢弃（见第 9 节 `20260921_153719`）。
 2. `measurementVariance` \(R\) 必须与雷达噪声方差同量级，不要用过小的 \(R\)。
 3. 滤波器输出替换 MPC 的铰接通道；Plant / 真值积分仍用 (K27)，二者不要混用。
+
+---
+
+## 0.1 移植架构：扩充已有 EKF，不另起滤波核
+
+目标仓的 EKF 类通常已经具备（名称以目标仓为准）
+
+\[
+x\leftarrow f(x,u),\quad
+P\leftarrow FPF^\top+Q,\quad
+y=z-h(x),\quad
+S=HPH^\top+R,\quad
+K=PH^\top S^{-1},\quad
+x\leftarrow x+Ky,\quad
+P\leftarrow (I-KH)P(I-KH)^\top+KRK^\top
+\]
+
+以及初始化 \(x,P\)、可选的 \(\chi^2\) 门限。**这些一律沿用，不要在铰接角模块里重写。**
+
+本方案要加的是三层，全部架在已有类外面或作为其**模型插件 / 子类**：
+
+```mermaid
+flowchart TB
+  subgraph existing [ExistingEKF_do_not_fork]
+    pred[predict_f_F_Q]
+    upd[update_h_H_R_Joseph]
+  end
+  subgraph add [NewInThisPort]
+    model[K5_3state_model]
+    hist[History_x_P_u]
+    delay[Align_stamp_then_replay]
+  end
+  imu[r1_U] --> model
+  model --> pred
+  pred --> hist
+  lidar[z_ts] --> delay
+  hist --> delay
+  delay --> upd
+  upd --> delay
+  delay --> mpc[phi_phiDot_to_MPC]
+```
+
+| 层 | 做什么 | 不要做什么 |
+|---|---|---|
+| 已有 EKF | 一步预测、量测更新、\(P\) 递推、已有门限/对称化 | 为铰接角再写一遍 \(K,S,P\) |
+| 模型插件 | 3 维状态 \(x=[\phi,b_{r2},b_\phi]^\top\)；\(f,F,Q\) 按第 4 节；(K5) 几何；\(h=\phi+b_\phi\)，\(H=[1,0,1]\)；\(\phi\) 与创新 `wrap` | 把 \(r_1\) 当状态、把 (K27) 四维塞进这套滤波 |
+| 时延外壳 | 缓存 \(\{t_k,x_k,P_k,u_k\}\)；雷达到达时把 EKF **快照回放到** \(t_s\) 最近帧，`update` 一次，再按缓存 \(u\) **顺序 `predict` 到现在** | 把迟到 \(z\) 当成当前量测直接 `update`；自己再实现一套平滑器 |
+
+对已有 EKF 若缺能力，只做**最小扩展**（优先加在基类，供其它滤波共用）：
+
+| 缺口 | 扩法 |
+|---|---|
+| 不能读写完整 \(x,P\) | 增加 `snapshot()` / `restore(x,P)` 或等价的 clone，供历史重传播 |
+| \(Q\) 每步不同 | 预测接口允许本步传入 \(Q\)（F5 含输入噪声与 coasting 倍率） |
+| 角度创新不 wrap | 本量测的残差回调里 `wrap(z-h)`；不要改其它滤波的残差 |
+| 只有标准 \(P=(I-KH)P\) | 沿用平台更新；有 Joseph 则用 Joseph |
+| 已有马氏门限 | 用平台门限，阈值对齐本文 `mahalanobisGate=9`（1 维 \(y^2/S\)） |
+| 状态维写死 | 用已有模板/配置把本实例设为 \(n=3,\,m=1\)，不要新开滤波库 |
+
+对照代码里的映射（便于读本仓库，**不要整文件粘贴成第二个 EKF**）：
+
+| 对照函数 | 落到已有 EKF |
+|---|---|
+| `propagate` 中 \(x^+=f(x,u)\)、\(F\)、\(Q\)、\(P\leftarrow FPF^\top+Q\) | `predict` + 本模型的 \(f,F,Q\) |
+| `applyLidarUpdate` 的 \(y,S,K,\) Joseph | `update` |
+| `updateLidar` 的 nearest + 改历史 + 后续 `propagate` | 时延外壳：`restore` → `update` → 多次 `predict` |
+| `trimHistory` / `HistoryFrame` | 外壳缓冲区，不是 EKF 内部状态机 |
+| `kinematicTrailerYawRate` | 模型里的 \(r_{2,\mathrm{kin}}\)，纯几何函数 |
 
 ---
 
@@ -217,10 +289,17 @@ r_2=r_{2,\mathrm{kin}}+b_{r2}+\text{（更快的未建模动态）}.
 
 选用理由：\(\tau\) 在 100–400 ms 内随机，状态维数不随 \(\tau\) 膨胀；更新对齐到
 \(t_s\) 后再用缓存的 \(r_1,U\) 积分到现在，等价于对可变延迟量测做平滑。
+在目标仓，这一步是「已有 EKF 的 `update` 打在历史帧上，再 `predict` 回当前」，
+不是新滤波算法。
 
 ---
 
-## 4. Delayed EKF 公式（与代码一一对应）
+## 4. Delayed EKF 公式（模型与时延步骤）
+
+下列 \(f,F,Q,h,H\) 和重传播顺序是要接到**已有 EKF** 上的模型与外壳。
+`propagate` / `applyLidarUpdate` 只是本仓库对照里的函数名，对应已有类的
+`predict` / `update`（见第 0.1 节）。状态维、雅可比、\(Q\) 公式必须按本节实现；
+\(K\) 与 \(P\) 的数值更新走平台核。
 
 ### 4.1 状态
 
@@ -571,33 +650,40 @@ t_{\mathrm{now}}-\texttt{lastAcceptedStamp}>\texttt{lostTimeout}.
 
 ---
 
-## 7. 代码契约（移植时按此实现）
+## 7. 接到已有 EKF 上的契约
 
-### 7.1 配置校验
+目标仓用已有 EKF 实例承载第 4 节模型；本仓库字段名只作对照。
 
-`ArticulationEstimatorConfig::validationError`：`historyHorizon, measurementVariance,
-processArticulationRateVariance, mahalanobisGate, lostTimeout, 三个 initial*` 必须
-有限且 \(>0\)；其余方差 \(\ge 0\)；`consecutiveRejectLimit >= 1`。
+### 7.1 配置与复位
 
-`configure` 会清空历史并 `initialized_=false`。`reset(t, phi)` 把状态设为
-\([\mathrm{wrap}(\phi),0,0]^\top\)，\(P\) 对角为三个 initial 方差，写入第一帧。
+`historyHorizon, measurementVariance, processArticulationRateVariance,
+mahalanobisGate, lostTimeout, 三个 initial*` 必须有限且 \(>0\)；其余方差 \(\ge 0\)；
+`consecutiveRejectLimit >= 1`。
 
-### 7.2 诊断结构 `ArticulationEstimate`
+复位：清空历史；已有 EKF `reset` 到
+\(x=[\mathrm{wrap}(\phi),0,0]^\top\)，\(P=\mathrm{diag}(P_\phi(0),P_{b_{r2}}(0),P_{b_\phi}(0))\)，
+把该快照写入历史第一帧。换几何或 \(Q/R\) 时同样清空历史。
 
-发布时保留上一次量测的 `innovation, S, mahalanobis, K, accepted, gated,
-alignedStamp`，避免 `predict` 把它们清掉。`historySize`、`coasting`、
-`consecutiveRejects` 每拍更新。
+### 7.2 每拍调用顺序（外壳）
 
-### 7.3 单测必须一并移植
+与对照实现 `predict` / `updateLidar` 相同，但预测/更新必须走已有 EKF：
 
-| 测试 | 断言 |
+1. IMU 拍：用当前 \(u\) 调已有 `predict` → 把返回的 \(x,P,u,t\) 入历史 → trim。
+2. 雷达包：`stamp` 出窗则丢弃（不是门限）；否则 `restore` 到最近历史帧 → 已有
+   `update`（含门限）→ 若接受，用该帧之后缓存的 \(u_{k}\) 连续 `predict` 到现在并
+   改写后续历史。
+3. 发布 \(\hat\phi,\hat{\dot\phi}\)（第 4.11 节）。量测诊断（\(y,S,d,K,\) accepted/gated）
+   以**这一次** `update` 为准，后续 `predict` 不得清掉。
+
+### 7.3 验收（在目标仓用已有 EKF 复现，不要拷本仓库测试文件当实现）
+
+| 用例 | 断言 |
 |---|---|
-| `kinematicTrailerYawRate` 对轴/偏轴 | 与 `nonlinearKinematics.theta2Dot` 一致 |
-| `testDelayedEkfCompensatesLidarLatency` | 200 ms 延迟、无噪声，估计 RMSE \(<0.015\,\mathrm{rad}\) 且 \(<0.35\times\) 原始迟到 RMSE |
-| `testLidarOutlierIsGated` | 大野值 gated，估计不被拉走 |
-| `testEstimatorCoastsAfterDropout` | 长时间无雷达则 coasting |
-| `testLidarFusionTracksPlantArticulation` | Demo 闭环，估计优于原始迟到雷达 |
-| `testSessionLogExportContainsFusionColumns` | 日志列齐全 |
+| \(r_{2,\mathrm{kin}}\) 对轴 / 偏轴 | 与 (K5) \(\dot\theta_2\) 一致 |
+| 固定 200 ms 时延、无噪声 | 当前 \(\hat\phi\) RMSE \(<0.015\,\mathrm{rad}\)，且明显小于原始迟到 \(z\) |
+| 大野值 | 门限拒绝，\(x\) 不被拉走 |
+| 长时间无雷达 | coasting，运动学继续，\(P_{\phi\phi}\) 增大 |
+| 闭环路径跟踪 | \(\hat\phi\) 优于原始迟到雷达（量级见第 9 节） |
 
 ---
 
@@ -692,20 +778,22 @@ EKF vs Plant RMSE **1.70°**，原始雷达 vs 当前 Plant **4.49°**，幅值�
 
 ## 11. 其他工作区移植清单
 
-按顺序做，不要先改公式。
+按顺序做。**滤波核用目标仓现成 EKF；本仓库代码只对照算法。**
 
-1. 拷贝 `articulation_estimator.hpp/.cpp` 以及它们依赖的 `Parameters`、`Matrix/Vector`。
-2. 实车线程：IMU/控制周期调 `predict`；雷达回调调 `updateLidar`（stamp 用扫描时）。
-3. 把 \(\hat\phi,\hat{\dot\phi}\) 写入横向控制器铰接通道；真值/底盘状态机不要用估计去积分轮胎模型。
-4. 设置 `historyHorizon = tau_max + dt_ctrl`（400 ms 工程值用 0.50–0.55 s），
-   `lostTimeout` 不小于该值，\(R=\sigma_{\mathrm{lidar}}^2\)。
-5. 确认 \(L_2,d_1,b_1\) 与实车几何一致；默认车 \(d_1=b_1=2.5\,\mathrm{m}\)，\(L_2=7\,\mathrm{m}\)。
-6. 复现第 7.3 节单测；实车先开环对比（估计 vs 雷达外推 vs 若有编码器）。
-7. 记录与本文第 8 节同构的时序，用第 9 节同一套指标验收：
-   RMSE(\(\hat\phi-\phi_{\mathrm{ref\_sensor}}\))、延迟分层、接受率、马氏均值、幅值比。
-8. **不要**改成标准 EKF（忽略时延）、不要把 \(\delta\) 代入 (K6) 代替 \(r_1\)、
-   不要在未对齐 \(R\) 时把门限降到 9 以下。
+1. 定位已有 EKF 类（`predict` / `update` / \(x,P\)）。确认能否快照与恢复；不能则按第 0.1 节做最小扩展。
+2. 新增铰接角**模型**（3 状态，第 4 节 \(f,F,Q,h,H\)），挂到该 EKF 的一个实例上。不要新开滤波库。
+3. 新增**时延外壳**（历史 \(\{t,x,P,u\}\)、对齐 `stamp`、回放 `update`、重 `predict`）。几何参数
+   \(L_2,d_1,b_1\) 与实车一致即可，不必依赖本仓库的 `Parameters` 类型。
+4. IMU/控制线程调外壳的高频 `predict`（内部转已有 EKF `predict`）；雷达回调把**扫描时刻**
+   `stamp` 和 \(\phi_{\mathrm{lidar}}\) 送进外壳（内部转已有 `update`）。
+5. \(\hat\phi,\hat{\dot\phi}\) 写入横向控制器铰接通道；底盘/Plant 积分不要用估计值。
+6. `historyHorizon = tau_max + dt_ctrl`（400 ms 用 0.50–0.55 s），`lostTimeout` 不小于该值，
+   \(R=\sigma_{\mathrm{lidar}}^2\)。
+7. 用第 7.3 节用例在目标仓回归；实车先开环对比（估计 vs 雷达外推 vs 若有编码器）。
+8. 记录与第 8 节同构的时序，按第 9 节指标验收。
+9. **不要**忽略时延、不要把 \(\delta\) 代入 (K6) 代替 IMU 的 \(r_1\)、不要在 \(R\) 未对齐时
+   把门限拧死、**不要**把 `articulation_estimator.cpp` 整文件拷进目标仓当第二套 EKF。
 
 需要改方案的仅有两种情况：新数据证明 400 ms 下 RMSE 仍显著大于雷达噪声；或产品改为
 直接 \(\phi\) 伺服且不能接受 0.74 幅值比。那时再动第 2.3 节的过程模型，而不是推翻
-延迟重传播结构。
+延迟重传播结构，更不要为此重写已有 EKF 核。

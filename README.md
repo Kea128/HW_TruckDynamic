@@ -25,7 +25,7 @@ Windows 下额外构建实时可视化 `truck_mpc_demo`。
 | [`docs/articulated_vehicle_model_zh-CN.md`](docs/articulated_vehicle_model_zh-CN.md) | 模型长文 |
 | [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Dear ImGui / ImPlot |
 
-把融合滤波器接到其他工作区时，以第 3 份文档为准，不要另起状态维。
+把融合滤波器接到其他工作区时，以第 3 份文档为准：在**已有 EKF 类上扩充**铰接角模型与时延重传播，不要另起滤波核或另起状态维。
 
 ## 环境
 
