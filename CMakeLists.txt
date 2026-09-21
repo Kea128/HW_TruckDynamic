@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(truck_model VERSION 2.8.0 LANGUAGES CXX)
+project(truck_model VERSION 2.8.1 LANGUAGES CXX)
 
 add_library(truck_model
     src/articulated_vehicle.cpp

@@ -1,3 +1,8 @@
+# TruckModel MPC Studio 2.8.1
+
+- 聚焦图表后，2×2 曲线铺满变高的单元格，当前时刻圆点随图高缩放。
+- 切换聚焦/平衡布局时自动适应轨迹，铰接点圆随地图比例缩放。
+
 # TruckModel MPC Studio 2.8.0
 
 横向 MPC Studio、路径/铰接角参考，以及 10 Hz、100–400 ms 时延雷达铰接角 Delayed EKF。

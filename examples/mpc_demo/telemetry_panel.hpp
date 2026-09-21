@@ -30,6 +30,9 @@ private:
         const char* unit,
         const char* format);
     [[nodiscard]] bool beginPlotGrid(const char* id);
+    void beginPlotCell();
+    [[nodiscard]] float plotHeight() const;
+    [[nodiscard]] float currentMarkerSize(float plotHeight) const;
     void plotArticulationCell(
         const DemoSession& session,
         bool darkTheme);
@@ -63,6 +66,8 @@ private:
     std::vector<double> curvatureRate_;
     std::size_t cachedTelemetryRevision_{
         std::numeric_limits<std::size_t>::max()};
+    float plotRowHeight_{220.0f};
+    int plotCellsInRow_{};
 };
 
 }  // namespace truck_demo

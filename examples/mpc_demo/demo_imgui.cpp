@@ -261,7 +261,7 @@ private:
         ImGui::TextColored(
             darkTheme_ ? ImVec4(0.25f, 0.75f, 1.0f, 1.0f)
                        : ImVec4(0.04f, 0.42f, 0.72f, 1.0f),
-            u8"MPC Studio 2.8.0");
+            u8"MPC Studio 2.8.1");
         ImGui::PopStyleColor();
         ImGui::SameLine(235.0f);
 
@@ -331,12 +331,14 @@ private:
                 showSettings_ ? u8"隐藏参数" : u8"显示参数",
                 ImVec2(82.0f, 36.0f))) {
             showSettings_ = !showSettings_;
+            fitRequested_ = true;
         }
         ImGui::SameLine();
         if (ImGui::Button(
                 telemetryFocus_ ? u8"平衡布局" : u8"聚焦图表",
                 ImVec2(82.0f, 36.0f))) {
             telemetryFocus_ = !telemetryFocus_;
+            fitRequested_ = true;
         }
 
         ImGui::SameLine(0.0f, 22.0f);
@@ -1580,16 +1582,18 @@ private:
             size);
         const ImVec2 hitch =
             worldToScreen(pose.hitchX, pose.hitchY, minimum, size);
+        const float hitchRadius = std::clamp(
+            static_cast<float>(0.32 * view_.pixelsPerMeter), 3.0f, 9.0f);
         draw->AddCircleFilled(
             hitch,
-            4.5f,
+            hitchRadius,
             darkTheme_ ? color(235, 239, 246) : color(214, 84, 44));
         draw->AddCircle(
             hitch,
-            5.0f,
+            hitchRadius + 0.6f,
             darkTheme_ ? color(16, 21, 29) : color(82, 43, 30),
             0,
-            1.5f);
+            std::clamp(hitchRadius * 0.28f, 1.2f, 2.2f));
     }
 
     truck_demo::DemoSession session_;
@@ -1781,7 +1785,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     RegisterClassExW(&windowClass);
     HWND window = CreateWindowW(
         windowClass.lpszClassName,
-        L"TruckModel MPC Studio 2.8.0",
+        L"TruckModel MPC Studio 2.8.1",
         WS_OVERLAPPEDWINDOW,
         80,
         60,

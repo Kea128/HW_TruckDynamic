@@ -240,11 +240,30 @@ void TelemetryPanel::summaryMetric(
 }
 
 bool TelemetryPanel::beginPlotGrid(const char* id) {
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    plotRowHeight_ = std::max(132.0f, (available.y - 8.0f) * 0.5f);
+    plotCellsInRow_ = 0;
     return ImGui::BeginTable(
         id,
         2,
         ImGuiTableFlags_SizingStretchSame,
-        ImGui::GetContentRegionAvail());
+        available);
+}
+
+void TelemetryPanel::beginPlotCell() {
+    if (plotCellsInRow_ == 0) {
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, plotRowHeight_);
+    }
+    ImGui::TableNextColumn();
+    plotCellsInRow_ = (plotCellsInRow_ + 1) % 2;
+}
+
+float TelemetryPanel::plotHeight() const {
+    return std::max(88.0f, ImGui::GetContentRegionAvail().y - 4.0f);
+}
+
+float TelemetryPanel::currentMarkerSize(float plotHeight) const {
+    return std::clamp(plotHeight * 0.032f, 3.5f, 10.0f);
 }
 
 void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
@@ -294,7 +313,7 @@ void TelemetryPanel::plotArticulationCell(
     const double error = articulationTrackingError_.empty()
                              ? 0.0
                              : articulationTrackingError_.back();
-    ImGui::TableNextColumn();
+    beginPlotCell();
     ImGui::TextUnformatted(u8"铰接角");
     ImGui::SameLine();
     ImGui::TextDisabled(u8"· 当前");
@@ -319,8 +338,7 @@ void TelemetryPanel::plotArticulationCell(
                   : ImVec4(0.72f, 0.42f, 0.04f, 1.0f),
         "%.2f",
         error);
-    const ImVec2 size = ImGui::GetContentRegionAvail();
-    const float height = std::max(120.0f, size.y * 0.5f - 18.0f);
+    const float height = plotHeight();
     if (ImPlot::BeginPlot(
             "##articulation_plot",
             ImVec2(-1.0f, height),
@@ -367,6 +385,19 @@ void TelemetryPanel::plotArticulationCell(
                 time_.data(),
                 articulationReference_.data(),
                 static_cast<int>(articulationReference_.size()));
+            const double currentTime = time_.back();
+            const double currentValue = articulation_.back();
+            ImPlot::SetNextMarkerStyle(
+                ImPlotMarker_Circle,
+                currentMarkerSize(height),
+                ImVec4(1.0f, 0.56f, 0.20f, 1.0f),
+                IMPLOT_AUTO,
+                ImVec4(1.0f, 0.82f, 0.45f, 1.0f));
+            ImPlot::PlotScatter(
+                "##CurrentArticulation",
+                &currentTime,
+                &currentValue,
+                1);
         }
         ImPlot::EndPlot();
     }
@@ -382,7 +413,7 @@ void TelemetryPanel::plotCell(
     double minimum,
     double maximum,
     const char* valueFormat) {
-    ImGui::TableNextColumn();
+    beginPlotCell();
     ImGui::TextUnformatted(title);
     ImGui::SameLine();
     ImGui::TextDisabled(u8"· 当前");
@@ -392,8 +423,7 @@ void TelemetryPanel::plotCell(
                   : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
         valueFormat,
         values.empty() ? 0.0 : values.back());
-    const ImVec2 size = ImGui::GetContentRegionAvail();
-    const float height = std::max(120.0f, size.y * 0.5f - 18.0f);
+    const float height = plotHeight();
     std::string plotId = "##";
     plotId += id;
     if (ImPlot::BeginPlot(
@@ -425,7 +455,7 @@ void TelemetryPanel::plotCell(
             const double currentValue = values.back();
             ImPlot::SetNextMarkerStyle(
                 ImPlotMarker_Circle,
-                4.0f,
+                currentMarkerSize(height),
                 ImVec4(1.0f, 0.56f, 0.20f, 1.0f),
                 IMPLOT_AUTO,
                 ImVec4(1.0f, 0.82f, 0.45f, 1.0f));
