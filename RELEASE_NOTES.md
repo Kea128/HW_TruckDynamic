@@ -1,24 +1,20 @@
 # TruckModel MPC Studio 2.8.0
 
-- Session logs: each run can export vehicle/MPC/EKF settings, per-step
-  plant-control-lidar-filter timeseries, and the MPC horizon to
-  `runs/<timestamp>/`. Finished or faulted demos auto-export.
-- Delayed EKF diagnostics (innovation, Mahalanobis, kinematic r2, P, K)
-  are stored in telemetry for offline amplitude analysis.
+横向 MPC Studio、路径/铰接角参考，以及 10 Hz、100–400 ms 时延雷达铰接角 Delayed EKF。
 
-- Added a Delayed EKF for lidar articulation: K5 prediction from \(r_1,U\),
-  400 ms history replay, and Mahalanobis gating of 10 Hz delayed scans.
-- Studio can inject 100–300 ms lidar delay and feed the current
-  \(\hat\phi,\hat{\dot\phi}\) to MPC; telemetry overlays plant, radar, and
-  estimate. See `docs/3_articulation_fusion_filter.md`.
+## Delayed EKF
 
-- Added a time-varying articulation reference \(\phi_{\mathrm{ref}}(t)\) with
-  sine, periodic-step, and hand-drawn sources.
-- Extended linear MPC dynamic programming to track a state-reference preview
-  \((x-r)^\top Q(x-r)\) without changing the K27 plant or K35–K41 model.
-- Added an articulation-tracking experiment that zeros path-error weights and
-  feeds the K27 physical state to MPC so steering can follow
-  \(\phi_{\mathrm{ref}}\) without fighting \(e_y,e_\psi\).
-- Overlayed measured and reference articulation in telemetry, and reported
-  the live tracking error in the toolbar.
-- Retained path-tracking regulation to zero when the reference mode is off.
+- 过程模型为 (K5)，状态 \(x=[\phi,b_{r2},b_\phi]^\top\)；量测为带时延的雷达 \(\phi\)。
+- 历史重传播补偿可变时延；马氏门限拒野值；路径跟踪下 100–400 ms 时延 RMSE 约 1.7°–1.8°。
+- **接到其他工作区时，必须扩充目标仓已有 EKF 类**（`predict` / `update`），不要拷贝第二套卡尔曼核。方案、接口与验收见 `docs/3_articulation_fusion_filter.md`。
+
+## Studio
+
+- 六状态误差 MPC，Plant 仍为 K27；曲率自适应车速、手绘参考线。
+- 可设 \(\phi_{\mathrm{ref}}(t)\)（正弦 / 阶跃 / 手绘）及铰接角跟踪实验。
+- 可注入 10 Hz、100–500 ms 雷达时延与噪声，遥测叠加 Plant、雷达、估计。
+- 运行可导出 `runs/<timestamp>/`（settings、时序、预测域、路径）；结束或故障时自动导出。
+
+## 库
+
+- C++17，核心无第三方依赖；Windows 下可选构建 `truck_mpc_demo`（ImGui / ImPlot）。
