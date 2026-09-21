@@ -1,0 +1,15 @@
+# CMake and IDE output
+/build*/
+/.vs/
+/out/
+CMakeUserPresets.json
+*.user
+
+# Runtime-generated UI state
+/imgui.ini
+
+# Demo session exports (settings + CSV)
+/runs/
+
+# Packaged binaries are rebuilt from source
+/release/

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 600" width="1180" height="600" role="img" aria-labelledby="title desc">
+  <title id="title">Linear lateral dynamics free-body diagram</title>
+  <desc id="desc">Tractor and trailer lateral tire forces, hitch force H, and yaw moment arms.</desc>
+  <defs>
+    <marker id="fArrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#b42318"/>
+    </marker>
+    <marker id="hArrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#7c3aed"/>
+    </marker>
+    <marker id="nArrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#4b5563"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1180" height="600" fill="#fafbfc"/>
+  <text x="590" y="36" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="20" font-weight="600" fill="#111827">Linear lateral dynamics: free-body diagram</text>
+  <text x="590" y="58" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#6b7280">Small-angle: cos &#x03B4; &#x2248; 1. Longitudinal hitch force omitted from the lateral subsystem. Left-positive. H: trailer on tractor.</text>
+
+  <text x="780" y="92" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="15" font-weight="600" fill="#1e3a5f">Tractor free body</text>
+
+  <polygon points="990,206 672,251 680,298 998,253" fill="#c5d8ec" stroke="#1e3a5f" stroke-width="2"/>
+  <polygon points="998,253 990,206 968,196 952,256" fill="#9bb8d4" stroke="#1e3a5f" stroke-width="1.5"/>
+  <line x1="676" y1="274" x2="994" y2="230" stroke="#1e3a5f" stroke-width="1" stroke-dasharray="5 4" opacity="0.65"/>
+
+  <line x1="952" y1="239" x2="986" y2="218" stroke="#111827" stroke-width="9" stroke-linecap="round"/>
+  <line x1="676" y1="276" x2="708" y2="271" stroke="#111827" stroke-width="9" stroke-linecap="round"/>
+
+  <circle cx="968" cy="227" r="4.6" fill="#111827"/>
+  <circle cx="820" cy="248" r="6" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="1.1"/>
+  <circle cx="691" cy="266" r="4.6" fill="#111827"/>
+  <circle cx="713" cy="263" r="6.4" fill="#fff" stroke="#b42318" stroke-width="2.2"/>
+
+  <text x="978" y="214" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">F<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="828" y="240" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#1d4ed8">O<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="662" y="260" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">R<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="720" y="252" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#b42318">P<tspan baseline-shift="sub" font-size="10">h</tspan></text>
+
+  <line x1="968" y1="227" x2="954" y2="132" stroke="#b42318" stroke-width="2.2" marker-end="url(#fArrow)"/>
+  <text x="970" y="128" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#b42318">F<tspan baseline-shift="sub" font-size="11">1f</tspan></text>
+
+  <line x1="691" y1="266" x2="678" y2="178" stroke="#b42318" stroke-width="2.2" marker-end="url(#fArrow)"/>
+  <text x="640" y="174" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#b42318">F<tspan baseline-shift="sub" font-size="11">1r</tspan></text>
+
+  <line x1="713" y1="263" x2="700" y2="168" stroke="#7c3aed" stroke-width="2.2" marker-end="url(#hArrow)"/>
+  <text x="708" y="158" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#7c3aed">H</text>
+  <text x="724" y="172" font-family="Cambria, Times New Roman, serif" font-size="11" fill="#7c3aed">trailer &#x2192; tractor</text>
+
+  <path d="M800,220 A30,30 0 0 0 848,236" fill="none" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#nArrow)"/>
+  <text x="854" y="220" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#7c3aed">r<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+
+  <line x1="968" y1="227" x2="976" y2="318" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="820" y1="248" x2="828" y2="339" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="691" y1="266" x2="699" y2="357" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="713" y1="263" x2="721" y2="378" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="976" y1="318" x2="828" y2="339" stroke="#4b5563" stroke-width="1.1"/>
+  <line x1="828" y1="339" x2="699" y2="357" stroke="#4b5563" stroke-width="1.1"/>
+  <line x1="828" y1="360" x2="721" y2="378" stroke="#7c3aed" stroke-width="1.1"/>
+  <text x="896" y="342" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">a<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="752" y="362" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">b<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="760" y="388" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#7c3aed">d<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+
+  <text x="780" y="430" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#1e3a5f">m<tspan baseline-shift="sub" font-size="10">1</tspan>(v&#x0307;<tspan baseline-shift="sub" font-size="10">y1</tspan> + U r<tspan baseline-shift="sub" font-size="10">1</tspan>) = F<tspan baseline-shift="sub" font-size="10">1f</tspan> + F<tspan baseline-shift="sub" font-size="10">1r</tspan> + H</text>
+  <text x="780" y="452" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#1e3a5f">I<tspan baseline-shift="sub" font-size="10">1</tspan> r&#x0307;<tspan baseline-shift="sub" font-size="10">1</tspan> = a<tspan baseline-shift="sub" font-size="10">1</tspan> F<tspan baseline-shift="sub" font-size="10">1f</tspan> &#x2212; b<tspan baseline-shift="sub" font-size="10">1</tspan> F<tspan baseline-shift="sub" font-size="10">1r</tspan> &#x2212; d<tspan baseline-shift="sub" font-size="10">1</tspan> H</text>
+
+  <text x="300" y="92" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="15" font-weight="600" fill="#1b4d3e">Trailer free body</text>
+
+  <polygon points="448,226 98,190 90,238 440,274" fill="#c8e0d4" stroke="#1b4d3e" stroke-width="2"/>
+  <line x1="104" y1="214" x2="444" y2="250" stroke="#1b4d3e" stroke-width="1" stroke-dasharray="5 4" opacity="0.65"/>
+  <line x1="112" y1="208" x2="146" y2="212" stroke="#111827" stroke-width="9" stroke-linecap="round"/>
+
+  <circle cx="430" cy="250" r="6.4" fill="#fff" stroke="#b42318" stroke-width="2.2"/>
+  <circle cx="280" cy="234" r="6" fill="#0f766e" stroke="#065f46" stroke-width="1.1"/>
+  <circle cx="128" cy="218" r="4.6" fill="#111827"/>
+
+  <text x="438" y="240" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#b42318">P<tspan baseline-shift="sub" font-size="10">h</tspan></text>
+  <text x="286" y="222" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#0f766e">O<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+  <text x="100" y="206" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">R<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+
+  <line x1="128" y1="218" x2="140" y2="128" stroke="#b42318" stroke-width="2.2" marker-end="url(#fArrow)"/>
+  <text x="148" y="124" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#b42318">F<tspan baseline-shift="sub" font-size="11">2r</tspan></text>
+
+  <line x1="430" y1="250" x2="418" y2="348" stroke="#7c3aed" stroke-width="2.2" marker-end="url(#hArrow)"/>
+  <text x="428" y="368" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#7c3aed">&#x2212;H</text>
+  <text x="448" y="368" font-family="Cambria, Times New Roman, serif" font-size="11" fill="#7c3aed">tractor &#x2192; trailer</text>
+
+  <path d="M260,208 A26,26 0 0 0 304,222" fill="none" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#nArrow)"/>
+  <text x="310" y="204" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#7c3aed">r<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+
+  <line x1="430" y1="250" x2="422" y2="330" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="280" y1="234" x2="272" y2="314" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="128" y1="218" x2="120" y2="298" stroke="#9ca3af" stroke-width="0.8"/>
+  <line x1="422" y1="330" x2="272" y2="314" stroke="#4b5563" stroke-width="1.1"/>
+  <line x1="272" y1="314" x2="120" y2="298" stroke="#4b5563" stroke-width="1.1"/>
+  <text x="338" y="336" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">a<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+  <text x="186" y="320" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">b<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+
+  <text x="300" y="430" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#1b4d3e">m<tspan baseline-shift="sub" font-size="10">2</tspan>(v&#x0307;<tspan baseline-shift="sub" font-size="10">y2</tspan> + U r<tspan baseline-shift="sub" font-size="10">2</tspan>) = F<tspan baseline-shift="sub" font-size="10">2r</tspan> &#x2212; H</text>
+  <text x="300" y="452" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#1b4d3e">I<tspan baseline-shift="sub" font-size="10">2</tspan> r&#x0307;<tspan baseline-shift="sub" font-size="10">2</tspan> = &#x2212; b<tspan baseline-shift="sub" font-size="10">2</tspan> F<tspan baseline-shift="sub" font-size="10">2r</tspan> &#x2212; a<tspan baseline-shift="sub" font-size="10">2</tspan> H</text>
+
+  <path d="M448,250 L700,262" stroke="#b42318" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="574" y="248" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#b42318">same hitch (exploded)</text>
+
+  <rect x="70" y="478" width="1040" height="100" rx="6" fill="#fff" stroke="#e5e7eb"/>
+  <text x="88" y="504" font-family="Cambria, Times New Roman, serif" font-size="13" font-weight="600" fill="#111827">Linear tire: &#x03B1; = wheel heading &#x2212; contact-velocity heading,  F<tspan baseline-shift="sub" font-size="10">y</tspan> = C<tspan baseline-shift="sub" font-size="10">&#x03B1;</tspan> &#x03B1;</text>
+  <text x="88" y="528" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x03B1;<tspan baseline-shift="sub" font-size="10">1f</tspan> = &#x03B4; &#x2212; (v<tspan baseline-shift="sub" font-size="10">y1</tspan> + a<tspan baseline-shift="sub" font-size="10">1</tspan> r<tspan baseline-shift="sub" font-size="10">1</tspan>)/U ,   F<tspan baseline-shift="sub" font-size="10">1f</tspan> = C<tspan baseline-shift="sub" font-size="10">1f</tspan> &#x03B1;<tspan baseline-shift="sub" font-size="10">1f</tspan></text>
+  <text x="88" y="550" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x03B1;<tspan baseline-shift="sub" font-size="10">1r</tspan> = &#x2212; (v<tspan baseline-shift="sub" font-size="10">y1</tspan> &#x2212; b<tspan baseline-shift="sub" font-size="10">1</tspan> r<tspan baseline-shift="sub" font-size="10">1</tspan>)/U ,   F<tspan baseline-shift="sub" font-size="10">1r</tspan> = C<tspan baseline-shift="sub" font-size="10">1r</tspan> &#x03B1;<tspan baseline-shift="sub" font-size="10">1r</tspan></text>
+  <text x="620" y="528" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x03B1;<tspan baseline-shift="sub" font-size="10">2r</tspan> = &#x2212; (v<tspan baseline-shift="sub" font-size="10">y2</tspan> &#x2212; b<tspan baseline-shift="sub" font-size="10">2</tspan> r<tspan baseline-shift="sub" font-size="10">2</tspan>)/U ,   F<tspan baseline-shift="sub" font-size="10">2r</tspan> = C<tspan baseline-shift="sub" font-size="10">2r</tspan> &#x03B1;<tspan baseline-shift="sub" font-size="10">2r</tspan></text>
+  <text x="620" y="550" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#6b7280">Keep U&#x03C6; in the linearized hitch constraint: v<tspan baseline-shift="sub" font-size="10">y2</tspan> = v<tspan baseline-shift="sub" font-size="10">y1</tspan> &#x2212; d<tspan baseline-shift="sub" font-size="10">1</tspan> r<tspan baseline-shift="sub" font-size="10">1</tspan> &#x2212; a<tspan baseline-shift="sub" font-size="10">2</tspan> r<tspan baseline-shift="sub" font-size="10">2</tspan> + U&#x03C6;</text>
+</svg>

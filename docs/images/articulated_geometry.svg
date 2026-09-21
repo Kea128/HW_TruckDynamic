@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 640" width="1180" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">Tractor-semitrailer bicycle model: geometry and frames</title>
+  <desc id="desc">Planar single-track model with axle centers, mass centers, hitch, body frames, heading angles, and articulation angle.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#1f2937"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="arrowTeal" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#0f766e"/>
+    </marker>
+    <marker id="arrowGray" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#4b5563"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1180" height="640" fill="#fafbfc"/>
+
+  <text x="590" y="36" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="20" font-weight="600" fill="#111827">Tractor-semitrailer bicycle model</text>
+  <text x="590" y="58" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#6b7280">Top view, schematic (not to scale). Body x forward, y left. Heading CCW positive.</text>
+
+  <g>
+    <line x1="56" y1="575" x2="156" y2="575" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <line x1="56" y1="575" x2="56" y2="485" stroke="#1f2937" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="164" y="580" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#111827">X</text>
+    <text x="48" y="476" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#111827">Y</text>
+    <text x="72" y="598" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#6b7280">global frame</text>
+  </g>
+
+  <line x1="552" y1="286.1" x2="722" y2="286.1" stroke="#9ca3af" stroke-width="1" stroke-dasharray="5 4"/>
+  <line x1="268" y1="278.7" x2="400" y2="278.7" stroke="#9ca3af" stroke-width="1" stroke-dasharray="5 4"/>
+  <line x1="430" y1="329.1" x2="618" y2="289.1" stroke="#1e3a5f" stroke-width="1" stroke-dasharray="3 3" opacity="0.55"/>
+  <line x1="421" y1="292.6" x2="619" y2="327.5" stroke="#1b4d3e" stroke-width="1" stroke-dasharray="3 3" opacity="0.55"/>
+
+  <polygon points="532.0,287.8 169.6,223.9 161.3,271.1 523.7,335.0" fill="#c8e0d4" stroke="#1b4d3e" stroke-width="2.2"/>
+  <polygon points="811.8,225.5 469.5,298.3 478.6,341.3 821.0,268.5" fill="#c5d8ec" stroke="#1e3a5f" stroke-width="2.2"/>
+  <polygon points="821.0,268.5 811.8,225.5 790.2,214.8 772.4,272.2" fill="#9bb8d4" stroke="#1e3a5f" stroke-width="1.6"/>
+
+  <line x1="165.5" y1="247.5" x2="527.9" y2="311.4" stroke="#1b4d3e" stroke-width="1.1" stroke-dasharray="6 4" opacity="0.7"/>
+  <line x1="474.0" y1="319.8" x2="816.4" y2="247.0" stroke="#1e3a5f" stroke-width="1.1" stroke-dasharray="6 4" opacity="0.7"/>
+
+  <line x1="177.3" y1="249.6" x2="212.7" y2="255.8" stroke="#111827" stroke-width="10" stroke-linecap="round"/>
+  <line x1="477.9" y1="318.9" x2="513.1" y2="311.5" stroke="#111827" stroke-width="10" stroke-linecap="round"/>
+  <line x1="771.7" y1="262.8" x2="806.3" y2="242.8" stroke="#111827" stroke-width="10" stroke-linecap="round"/>
+  <line x1="186.6" y1="236.2" x2="203.4" y2="269.2" stroke="#374151" stroke-width="1.4"/>
+  <line x1="488.2" y1="296.8" x2="502.8" y2="333.6" stroke="#374151" stroke-width="1.4"/>
+  <line x1="780.4" y1="233.4" x2="797.6" y2="272.2" stroke="#374151" stroke-width="1.4"/>
+
+  <line x1="632.5" y1="286.1" x2="701.0" y2="271.5" stroke="#1d4ed8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <line x1="632.5" y1="286.1" x2="621.1" y2="232.3" stroke="#1d4ed8" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="710" y="268" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#1d4ed8">e<tspan baseline-shift="sub" font-size="10">x1</tspan></text>
+  <text x="598" y="226" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#1d4ed8">e<tspan baseline-shift="sub" font-size="10">y1</tspan></text>
+
+  <line x1="342.7" y1="278.7" x2="411.7" y2="290.9" stroke="#0f766e" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <line x1="342.7" y1="278.7" x2="352.3" y2="224.6" stroke="#0f766e" stroke-width="2" marker-end="url(#arrowTeal)"/>
+  <text x="418" y="308" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#0f766e">e<tspan baseline-shift="sub" font-size="10">x2</tspan></text>
+  <text x="360" y="218" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#0f766e">e<tspan baseline-shift="sub" font-size="10">y2</tspan></text>
+
+  <line x1="632.5" y1="286.1" x2="755.0" y2="260.1" stroke="#b45309" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <text x="748" y="252" font-family="Cambria, Times New Roman, serif" font-size="13" font-style="italic" fill="#b45309">U<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <line x1="342.7" y1="278.7" x2="431.2" y2="294.3" stroke="#b45309" stroke-width="1.7" marker-end="url(#arrowGray)"/>
+  <text x="428" y="318" font-family="Cambria, Times New Roman, serif" font-size="13" font-style="italic" fill="#b45309">U<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+
+  <path d="M612,262 A28,28 0 0 0 658,278" fill="none" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowGray)"/>
+  <text x="668" y="248" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#7c3aed">r<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <path d="M322,256 A26,26 0 0 0 366,272" fill="none" stroke="#7c3aed" stroke-width="1.5" marker-end="url(#arrowGray)"/>
+  <text x="372" y="248" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#7c3aed">r<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+
+  <circle cx="789.0" cy="252.8" r="5.2" fill="#111827"/>
+  <circle cx="632.5" cy="286.1" r="6.2" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="1.2"/>
+  <circle cx="495.5" cy="315.2" r="5.2" fill="#111827"/>
+  <circle cx="520.0" cy="310.0" r="7.0" fill="#fff" stroke="#b42318" stroke-width="2.4"/>
+  <circle cx="342.7" cy="278.7" r="6.2" fill="#0f766e" stroke="#065f46" stroke-width="1.2"/>
+  <circle cx="195.0" cy="252.7" r="5.2" fill="#111827"/>
+
+  <text x="802" y="238" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">F<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+  <text x="638" y="274" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#1d4ed8">O<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+  <text x="458" y="308" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">R<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+  <text x="528" y="300" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#b42318">P<tspan baseline-shift="sub" font-size="11">h</tspan></text>
+  <text x="318" y="268" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#0f766e">O<tspan baseline-shift="sub" font-size="11">2</tspan></text>
+  <text x="160" y="238" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">R<tspan baseline-shift="sub" font-size="11">2</tspan></text>
+
+  <path d="M830.1,244.1 A42,42 0 0 0 825.4,231.8" fill="none" stroke="#b45309" stroke-width="1.6"/>
+  <text x="838" y="228" font-family="Cambria, Times New Roman, serif" font-size="18" font-style="italic" fill="#b45309">&#x03B4;</text>
+
+  <path d="M682.5,286.1 A50,50 0 0 0 681.4,275.7" fill="none" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="690" y="300" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#1d4ed8">&#x03B8;<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+
+  <path d="M392.7,278.7 A50,50 0 0 1 391.9,287.5" fill="none" stroke="#0f766e" stroke-width="1.5"/>
+  <text x="398" y="274" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#0f766e">&#x03B8;<tspan baseline-shift="sub" font-size="11">2</tspan></text>
+
+  <path d="M588.9,322.2 A70,70 0 0 0 588.5,295.4" fill="none" stroke="#b42318" stroke-width="1.8"/>
+  <text x="602" y="316" font-family="Cambria, Times New Roman, serif" font-size="18" font-style="italic" fill="#b42318">&#x03C6;</text>
+  <text x="618" y="332" font-family="Cambria, Times New Roman, serif" font-size="12" font-style="italic" fill="#b42318">= &#x03B8;<tspan baseline-shift="sub" font-size="9">1</tspan> &#x2212; &#x03B8;<tspan baseline-shift="sub" font-size="9">2</tspan></text>
+
+  <line x1="789.0" y1="252.8" x2="800.4" y2="306.6" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="632.5" y1="286.1" x2="643.9" y2="339.9" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="495.5" y1="315.2" x2="507.0" y2="369.0" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="800.4" y1="306.6" x2="643.9" y2="339.9" stroke="#4b5563" stroke-width="1.15"/>
+  <line x1="643.9" y1="339.9" x2="507.0" y2="369.0" stroke="#4b5563" stroke-width="1.15"/>
+  <text x="728" y="338" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">a<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+  <text x="568" y="368" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">b<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+
+  <line x1="632.5" y1="286.1" x2="649.8" y2="367.3" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="520.0" y1="310.0" x2="537.3" y2="391.2" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="649.8" y1="367.3" x2="537.3" y2="391.2" stroke="#b42318" stroke-width="1.15"/>
+  <text x="580" y="396" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#b42318">d<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+
+  <line x1="520.0" y1="310.0" x2="509.9" y2="367.1" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="342.7" y1="278.7" x2="332.7" y2="335.9" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="195.0" y1="252.7" x2="184.9" y2="309.8" stroke="#6b7280" stroke-width="0.8"/>
+  <line x1="509.9" y1="367.1" x2="332.7" y2="335.9" stroke="#4b5563" stroke-width="1.15"/>
+  <line x1="332.7" y1="335.9" x2="184.9" y2="309.8" stroke="#4b5563" stroke-width="1.15"/>
+  <text x="418" y="366" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">a<tspan baseline-shift="sub" font-size="11">2</tspan></text>
+  <text x="250" y="338" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#111827">b<tspan baseline-shift="sub" font-size="11">2</tspan></text>
+
+  <rect x="880" y="88" width="276" height="492" rx="6" fill="#fff" stroke="#e5e7eb"/>
+  <text x="896" y="114" font-family="Cambria, Times New Roman, serif" font-size="14" font-weight="600" fill="#111827">Points</text>
+  <text x="896" y="138" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">F<tspan baseline-shift="sub" font-size="10">1</tspan>  tractor front axle</text>
+  <text x="896" y="158" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">O<tspan baseline-shift="sub" font-size="10">1</tspan>  tractor CG</text>
+  <text x="896" y="178" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">R<tspan baseline-shift="sub" font-size="10">1</tspan>  tractor rear axle</text>
+  <text x="896" y="198" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">P<tspan baseline-shift="sub" font-size="10">h</tspan>  hitch</text>
+  <text x="896" y="218" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">O<tspan baseline-shift="sub" font-size="10">2</tspan>  trailer CG</text>
+  <text x="896" y="238" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">R<tspan baseline-shift="sub" font-size="10">2</tspan>  trailer axle</text>
+
+  <line x1="896" y1="252" x2="1136" y2="252" stroke="#e5e7eb"/>
+  <text x="896" y="276" font-family="Cambria, Times New Roman, serif" font-size="14" font-weight="600" fill="#111827">Lengths</text>
+  <text x="896" y="300" font-family="Cambria, Times New Roman, serif" font-size="14" fill="#111827">L<tspan baseline-shift="sub" font-size="10">1</tspan> = a<tspan baseline-shift="sub" font-size="10">1</tspan> + b<tspan baseline-shift="sub" font-size="10">1</tspan></text>
+  <text x="896" y="320" font-family="Cambria, Times New Roman, serif" font-size="14" fill="#111827">L<tspan baseline-shift="sub" font-size="10">2</tspan> = a<tspan baseline-shift="sub" font-size="10">2</tspan> + b<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+  <text x="896" y="344" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">d<tspan baseline-shift="sub" font-size="10">1</tspan> : O<tspan baseline-shift="sub" font-size="10">1</tspan> rearward to P<tspan baseline-shift="sub" font-size="10">h</tspan></text>
+  <text x="896" y="364" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">b<tspan baseline-shift="sub" font-size="10">1</tspan> &#x2212; d<tspan baseline-shift="sub" font-size="10">1</tspan> : R<tspan baseline-shift="sub" font-size="10">1</tspan> forward to P<tspan baseline-shift="sub" font-size="10">h</tspan></text>
+  <text x="896" y="388" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">Here d<tspan baseline-shift="sub" font-size="10">1</tspan> &lt; b<tspan baseline-shift="sub" font-size="10">1</tspan>,</text>
+  <text x="896" y="408" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">so P<tspan baseline-shift="sub" font-size="10">h</tspan> is ahead of R<tspan baseline-shift="sub" font-size="10">1</tspan>.</text>
+  <text x="896" y="432" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">If d<tspan baseline-shift="sub" font-size="10">1</tspan> = b<tspan baseline-shift="sub" font-size="10">1</tspan>,</text>
+  <text x="896" y="452" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">then P<tspan baseline-shift="sub" font-size="10">h</tspan> coincides with R<tspan baseline-shift="sub" font-size="10">1</tspan>.</text>
+
+  <line x1="896" y1="466" x2="1136" y2="466" stroke="#e5e7eb"/>
+  <text x="896" y="490" font-family="Cambria, Times New Roman, serif" font-size="14" font-weight="600" fill="#111827">Angles and speeds</text>
+  <text x="896" y="514" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#111827">&#x03C6; = &#x03B8;<tspan baseline-shift="sub" font-size="10">1</tspan> &#x2212; &#x03B8;<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+  <text x="896" y="534" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#111827">r<tspan baseline-shift="sub" font-size="10">1</tspan> = &#x03B8;&#x0307;<tspan baseline-shift="sub" font-size="10">1</tspan>,   r<tspan baseline-shift="sub" font-size="10">2</tspan> = &#x03B8;&#x0307;<tspan baseline-shift="sub" font-size="10">2</tspan></text>
+  <text x="896" y="556" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">U<tspan baseline-shift="sub" font-size="10">i</tspan> forward, v<tspan baseline-shift="sub" font-size="10">yi</tspan> left</text>
+  <text x="896" y="576" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x03B4;, r, &#x03C6; : CCW / left +</text>
+
+  <rect x="80" y="88" width="14" height="10" fill="#c5d8ec" stroke="#1e3a5f"/>
+  <text x="100" y="98" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#1e3a5f">tractor (index 1)</text>
+  <rect x="230" y="88" width="14" height="10" fill="#c8e0d4" stroke="#1b4d3e"/>
+  <text x="250" y="98" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#1b4d3e">semitrailer (index 2)</text>
+  <circle cx="430" cy="93" r="5" fill="#fff" stroke="#b42318" stroke-width="2"/>
+  <text x="442" y="98" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#b42318">hitch P<tspan baseline-shift="sub" font-size="9">h</tspan></text>
+</svg>

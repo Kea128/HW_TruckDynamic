@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 540" width="1100" height="540" role="img" aria-labelledby="title desc">
+  <title id="title">Six-state path-error geometry</title>
+  <desc id="desc">Time-parameterized reference trajectory with lateral error ey, heading error e_psi, and longitudinal matching ex = 0.</desc>
+  <defs>
+    <marker id="pArrow" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#1f2937"/>
+    </marker>
+    <marker id="pBlue" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#1d4ed8"/>
+    </marker>
+    <marker id="pTeal" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#0f766e"/>
+    </marker>
+    <marker id="pOrange" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0,1.5 L12,6 L0,10.5 Z" fill="#b45309"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1100" height="540" fill="#fafbfc"/>
+  <text x="550" y="36" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="20" font-weight="600" fill="#111827">Six-state path-error model</text>
+  <text x="550" y="58" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#6b7280">Error at tractor CG O<tspan baseline-shift="sub" font-size="9">1</tspan>. Reference point p<tspan baseline-shift="sub" font-size="9">ref</tspan> travels at speed U. Longitudinal matching e<tspan baseline-shift="sub" font-size="9">x</tspan> &#x2261; 0, not closest-point Frenet.</text>
+
+  <circle cx="560" cy="96" r="3.5" fill="#6b7280"/>
+  <text x="572" y="92" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#6b7280">curvature center</text>
+
+  <path d="M 210,360 A 320,320 0 0 1 920,250" fill="none" stroke="#9ca3af" stroke-width="10" stroke-linecap="round" opacity="0.35"/>
+  <path d="M 210,360 A 320,320 0 0 1 920,250" fill="none" stroke="#374151" stroke-width="2.2"/>
+
+  <line x1="624" y1="548" x2="574" y2="196" stroke="#9ca3af" stroke-width="1.1" stroke-dasharray="5 4"/>
+
+  <circle cx="604.5" cy="412.9" r="5.5" fill="#111827"/>
+  <text x="618" y="436" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic">p<tspan baseline-shift="sub" font-size="11">ref</tspan></text>
+
+  <line x1="604.5" y1="412.9" x2="704" y2="398.9" stroke="#111827" stroke-width="2" marker-end="url(#pArrow)"/>
+  <text x="710" y="394" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic">t<tspan baseline-shift="sub" font-size="10">ref</tspan></text>
+  <line x1="604.5" y1="412.9" x2="590.5" y2="318" stroke="#0f766e" stroke-width="2" marker-end="url(#pTeal)"/>
+  <text x="548" y="308" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#0f766e">n<tspan baseline-shift="sub" font-size="10">ref</tspan></text>
+
+  <circle cx="592.5" cy="327.8" r="6.2" fill="#1d4ed8" stroke="#1e3a8a" stroke-width="1.2"/>
+  <text x="560" y="318" font-family="Cambria, Times New Roman, serif" font-size="15" font-style="italic" fill="#1d4ed8">O<tspan baseline-shift="sub" font-size="11">1</tspan></text>
+
+  <line x1="604.5" y1="400" x2="593.8" y2="340" stroke="#0f766e" stroke-width="2"/>
+  <polygon points="607,396 601,404 598,394" fill="#0f766e"/>
+  <polygon points="590,344 598,336 596,348" fill="#0f766e"/>
+  <text x="620" y="368" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#0f766e">e<tspan baseline-shift="sub" font-size="11">y</tspan></text>
+
+  <g transform="translate(592.5,327.8) rotate(-28)">
+    <rect x="-38" y="-12" width="86" height="24" rx="3" fill="#c5d8ec" stroke="#1e3a5f" stroke-width="1.8"/>
+    <rect x="30" y="-12" width="18" height="24" fill="#9bb8d4" stroke="#1e3a5f" stroke-width="1.4"/>
+    <line x1="-20" y1="-14" x2="-20" y2="14" stroke="#111827" stroke-width="3"/>
+    <line x1="36" y1="-16" x2="44" y2="-20" stroke="#111827" stroke-width="3" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="52" y2="0" stroke="#1d4ed8" stroke-width="1.6" marker-end="url(#pBlue)"/>
+  </g>
+  <text x="650" y="300" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#1d4ed8">e<tspan baseline-shift="sub" font-size="10">x1</tspan></text>
+
+  <line x1="592.5" y1="327.8" x2="692" y2="313.8" stroke="#9ca3af" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <path d="M672,316 A80,80 0 0 0 662,292" fill="none" stroke="#b45309" stroke-width="1.7"/>
+  <text x="678" y="298" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#b45309">e<tspan baseline-shift="sub" font-size="11">&#x03C8;</tspan></text>
+  <text x="696" y="314" font-family="Cambria, Times New Roman, serif" font-size="12" font-style="italic" fill="#6b7280">= &#x03B8;<tspan baseline-shift="sub" font-size="9">1</tspan> &#x2212; &#x03B8;<tspan baseline-shift="sub" font-size="9">ref</tspan></text>
+
+  <path d="M780,318 A40,40 0 0 1 812,292" fill="none" stroke="#7c3aed" stroke-width="1.6" marker-end="url(#pOrange)"/>
+  <text x="820" y="288" font-family="Cambria, Times New Roman, serif" font-size="16" font-style="italic" fill="#7c3aed">&#x03C1;</text>
+  <text x="836" y="288" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#7c3aed">left-turn +</text>
+  <text x="820" y="306" font-family="Cambria, Times New Roman, serif" font-size="12" font-style="italic" fill="#6b7280">&#x03B8;&#x0307;<tspan baseline-shift="sub" font-size="9">ref</tspan> = U &#x03C1;</text>
+
+  <line x1="760" y1="318" x2="830" y2="300" stroke="#b45309" stroke-width="1.8" marker-end="url(#pOrange)"/>
+  <text x="838" y="322" font-family="Cambria, Times New Roman, serif" font-size="14" font-style="italic" fill="#b45309">U</text>
+
+  <rect x="430" y="250" width="132" height="40" rx="4" fill="#fff" stroke="#e5e7eb"/>
+  <text x="496" y="268" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#111827">e<tspan baseline-shift="sub" font-size="10">x</tspan> &#x2261; 0</text>
+  <text x="496" y="284" text-anchor="middle" font-family="Cambria, Times New Roman, serif" font-size="11" fill="#6b7280">longitudinal match</text>
+  <line x1="560" y1="278" x2="592" y2="330" stroke="#9ca3af" stroke-width="0.9"/>
+
+  <rect x="48" y="78" width="320" height="168" rx="6" fill="#fff" stroke="#e5e7eb"/>
+  <text x="64" y="102" font-family="Cambria, Times New Roman, serif" font-size="14" font-weight="600" fill="#111827">Error state</text>
+  <text x="64" y="126" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#111827">x<tspan baseline-shift="sub" font-size="10">c</tspan> = [ e<tspan baseline-shift="sub" font-size="10">y</tspan>,  &#x0117;<tspan baseline-shift="sub" font-size="10">y</tspan>,  e<tspan baseline-shift="sub" font-size="10">&#x03C8;</tspan>,  &#x0117;<tspan baseline-shift="sub" font-size="10">&#x03C8;</tspan>,  &#x03C6;,  &#x03C6;&#x0307; ]<tspan baseline-shift="super" font-size="10">T</tspan></text>
+  <text x="64" y="150" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x0117;<tspan baseline-shift="sub" font-size="10">y</tspan> = v<tspan baseline-shift="sub" font-size="10">y1</tspan> + U e<tspan baseline-shift="sub" font-size="10">&#x03C8;</tspan></text>
+  <text x="64" y="172" font-family="Cambria, Times New Roman, serif" font-size="13" fill="#374151">&#x0117;<tspan baseline-shift="sub" font-size="10">&#x03C8;</tspan> = r<tspan baseline-shift="sub" font-size="10">1</tspan> &#x2212; U &#x03C1;</text>
+  <text x="64" y="194" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#6b7280">e<tspan baseline-shift="sub" font-size="9">y</tspan> : left offset of O<tspan baseline-shift="sub" font-size="9">1</tspan> from p<tspan baseline-shift="sub" font-size="9">ref</tspan></text>
+  <text x="64" y="214" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#6b7280">Dashed line = normal; O<tspan baseline-shift="sub" font-size="9">1</tspan> on it means e<tspan baseline-shift="sub" font-size="9">x</tspan> = 0</text>
+
+  <rect x="48" y="448" width="320" height="70" rx="6" fill="#fff" stroke="#e5e7eb"/>
+  <text x="64" y="472" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#374151">Exact e&#x0307;<tspan baseline-shift="sub" font-size="9">y</tspan> also has the term &#x2212;U&#x03C1; e<tspan baseline-shift="sub" font-size="9">x</tspan>.</text>
+  <text x="64" y="492" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#374151">This model sets e<tspan baseline-shift="sub" font-size="9">x</tspan> = 0, then linearizes e<tspan baseline-shift="sub" font-size="9">&#x03C8;</tspan> and v<tspan baseline-shift="sub" font-size="9">y1</tspan>/U.</text>
+  <text x="64" y="508" font-family="Cambria, Times New Roman, serif" font-size="12" fill="#6b7280">It is a time-parameterized small-error model.</text>
+</svg>

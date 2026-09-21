@@ -6,6 +6,8 @@
 
 更详细的逐式推导见
 [`2_truck_model_derivation.md`](2_truck_model_derivation.md)。
+实车 10 Hz 时延雷达铰接角融合见
+[`3_articulation_fusion_filter.md`](3_articulation_fusion_filter.md)。
 
 可视化验证报告见
 [最新推导验证 Canvas](https://cursor.com/dashboard/shared-canvases?shareId=canvas--dwF_B4CCAInb-mDcQVwzHpy)。
@@ -55,6 +57,13 @@ L_2=a_2+b_2.
 }
 \tag{K1}
 \]
+
+![卡车—半挂车单轨模型几何与坐标](images/articulated_geometry.svg)
+
+图中 \(F_1,O_1,R_1\) 是卡车前轴、质心和后轴，\(P_h\) 是铰接点，
+\(O_2,R_2\) 是拖车质心和拖车轴。车体 \(x\) 向前、\(y\) 向左；
+\(\phi=\theta_1-\theta_2\)。图示取 \(d_1<b_1\)，故 \(P_h\) 在 \(R_1\) 前方；
+当 \(d_1=b_1\) 时二者重合。
 
 ### 1.3 模型层次
 
@@ -194,6 +203,11 @@ I_2\dot r_2&=-b_2F_{2r}-a_2H.
 \end{aligned}}
 \tag{K8}
 \]
+
+![线性横向动力学自由体图](images/lateral_force_diagram.svg)
+
+\(H\) 是拖车作用于卡车的铰接横向力，向左为正。图中将同一铰接点拆成
+两个自由体，以同时标出 \(+H\) 与 \(-H\)。
 
 ---
 
@@ -581,6 +595,11 @@ e_\psi=\theta_1-\theta_{\mathrm{ref}},
 }
 \tag{K33}
 \]
+
+![六状态路径误差几何](images/path_error_geometry.svg)
+
+\(e_y\) 定义在卡车质心 \(O_1\)。纵向匹配假设使 \(O_1\) 落在参考法向
+\(\boldsymbol n_{\mathrm{ref}}\) 上，即 \(e_x\equiv 0\)。
 
 时间参数化参考轨迹的小误差运动学：
 
