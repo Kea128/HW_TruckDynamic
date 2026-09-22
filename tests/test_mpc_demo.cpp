@@ -801,6 +801,85 @@ void testLegacyShadowDropsOutOfWindowScans() {
         "the legacy 0.4 s window must drop the scans that arrive past it");
 }
 
+// Closing the loop on an estimate that reads low forces the plant to overshoot:
+// the controller drives the estimate onto the reference, so the true angle ends
+// up inflated by roughly the inverse of the estimator's amplitude ratio. This is
+// the reason the tracking experiment is not a fusion acceptance test.
+void testTrackingLoopAmplifiesEstimatorAmplitudeBias() {
+    struct Amplitudes {
+        double plantOverReference{};
+        double estimateOverPlant{};
+    };
+
+    const auto measure = [](bool fusion,
+                            truck_model::ArticulationProcessModel model) {
+        auto settings =
+            truck_demo::DemoSession::fusionTrackingComparisonSettings();
+        settings.lidarFusionEnabled = fusion;
+        settings.shadowEstimatorEnabled = false;
+        settings.articulationEstimator.processModel = model;
+        settings.applyEstimatorMeasurementFromLidar();
+
+        truck_demo::DemoSession session;
+        session.configure(settings);
+        session.setPath(truck_demo::curvatureWavePath(0.0, 80.0, 400.0));
+        session.beginArticulationTrackingExperiment();
+        session.start();
+        for (std::size_t step = 0; step < 1200; ++step) {
+            session.step();
+            if (session.simulationState() !=
+                truck_demo::SimulationState::running) {
+                break;
+            }
+        }
+        double reference = 0.0;
+        double plant = 0.0;
+        double estimate = 0.0;
+        std::size_t scored = 0;
+        for (const auto& sample : session.history()) {
+            // One full reference period of startup is discarded.
+            if (sample.time < 8.5) {
+                continue;
+            }
+            reference += sample.referenceArticulation *
+                         sample.referenceArticulation;
+            plant += sample.plantArticulation * sample.plantArticulation;
+            estimate +=
+                sample.estimatedArticulation * sample.estimatedArticulation;
+            ++scored;
+        }
+        require(scored > 100, "tracking run produced too little telemetry");
+        Amplitudes a;
+        a.plantOverReference = std::sqrt(plant / reference);
+        a.estimateOverPlant = std::sqrt(estimate / plant);
+        return a;
+    };
+
+    const auto openLoopTruth =
+        measure(false, truck_model::ArticulationProcessModel::kinematic);
+    require(
+        std::abs(openLoopTruth.plantOverReference - 1.0) < 0.05,
+        "feeding back the true angle must track the reference amplitude, "
+        "otherwise the overshoot is plain tracking error and not an "
+        "estimator artefact");
+
+    const auto kinematic =
+        measure(true, truck_model::ArticulationProcessModel::kinematic);
+    require(
+        kinematic.estimateOverPlant < 0.85,
+        "the K5 estimator is expected to read the articulation low");
+    require(
+        kinematic.plantOverReference > 1.10,
+        "a thin estimate in the loop must inflate the plant amplitude");
+
+    const auto dynamic =
+        measure(true, truck_model::ArticulationProcessModel::dynamic);
+    require(
+        std::abs(dynamic.plantOverReference - 1.0) <
+            std::abs(kinematic.plantOverReference - 1.0),
+        "the dynamic model must reduce the closed-loop amplitude inflation");
+}
+
 void testSessionLogExportContainsFusionColumns() {
     truck_demo::DemoSession session;
     auto settings = session.settings();
@@ -911,6 +990,7 @@ int main() {
         testShadowEstimatorRunsInParallel();
         testFusionComparisonPresetIsReady();
         testLegacyShadowDropsOutOfWindowScans();
+        testTrackingLoopAmplifiesEstimatorAmplitudeBias();
         testHistoryHorizonMustCoverLatency();
         testLidarInstallationBiasNeedsCalibration();
         testSessionLogExportContainsFusionColumns();

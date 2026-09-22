@@ -221,6 +221,17 @@ void TelemetryPanel::renderStateSummary(
             u8"警告：%s",
             session.warningReason().c_str());
     }
+    // Closing the loop on the estimate makes the plant absorb the estimator's
+    // amplitude error, so this configuration reads as a tracking overshoot that
+    // is really a filter bias. Saying so beats letting it look like a bug.
+    if (session.settings().articulationTrackingExperiment &&
+        session.settings().lidarFusionEnabled) {
+        ImGui::TextColored(
+            darkTheme ? ImVec4(0.98f, 0.78f, 0.28f, 1.0f)
+                      : ImVec4(0.72f, 0.42f, 0.04f, 1.0f),
+            u8"闭环反馈用的是估计值：估计偏瘦时 Plant 会按 1/幅值比 过冲，"
+            u8"参考与真值幅值不等属正常。此工况不作融合验收。");
+    }
     ImGui::Separator();
 }
 
