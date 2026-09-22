@@ -60,16 +60,10 @@ double speedLimitForReference(
 
 }  // namespace
 
-const char* estimatorDisplayName(
-    const truck_model::ArticulationEstimatorConfig& config) {
-    const bool legacy = config.compatibility.nearestFrameAlignment ||
-                        config.compatibility.diagonalEulerProcessNoise;
-    if (legacy) {
-        return "v1";
-    }
-    return config.processModel == truck_model::ArticulationProcessModel::dynamic
-               ? "v2 K27r"
-               : "v2 K5";
+const char* processModelName(truck_model::ArticulationProcessModel model) {
+    return model == truck_model::ArticulationProcessModel::dynamic
+               ? u8"\u52a8\u529b\u5b66 K27r"
+               : u8"\u8fd0\u52a8\u5b66 K5";
 }
 
 std::string DemoSettings::validationError() const {
@@ -151,42 +145,19 @@ std::string DemoSettings::validationError() const {
         lidarNoiseStd > 0.2) {
         errors << "lidarNoiseStd must be finite and within [0, 0.2] rad; ";
     }
-    if (!std::isfinite(lidarInstallationBias) ||
-        std::abs(lidarInstallationBias) > 0.2) {
-        errors <<
-            "lidarInstallationBias must be finite and within +/-0.2 rad; ";
-    }
     if (!std::isfinite(inputYawRateNoiseStd) || inputYawRateNoiseStd < 0.0 ||
         inputYawRateNoiseStd > 0.5) {
         errors <<
             "inputYawRateNoiseStd must be finite and within [0, 0.5] rad/s; ";
     }
-    if (!std::isfinite(inputYawRateBias) ||
-        std::abs(inputYawRateBias) > 0.5) {
-        errors << "inputYawRateBias must be finite and within +/-0.5 rad/s; ";
-    }
     if (!std::isfinite(inputSpeedNoiseStd) || inputSpeedNoiseStd < 0.0 ||
         inputSpeedNoiseStd > 5.0) {
         errors << "inputSpeedNoiseStd must be finite and within [0, 5] m/s; ";
     }
-    // A window shorter than the worst-case latency silently discards scans, so
-    // it is rejected. Legacy compatibility mode is exempt: reproducing that
-    // packet loss is the entire point of running the old filter.
-    const bool legacyPrimary =
-        articulationEstimator.compatibility.nearestFrameAlignment ||
-        articulationEstimator.compatibility.diagonalEulerProcessNoise;
-    if (!legacyPrimary &&
-        lidarDelayMax > articulationEstimator.historyHorizon) {
+    // A window shorter than the worst-case latency silently discards scans.
+    if (lidarDelayMax > articulationEstimator.historyHorizon) {
         errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
                   "scans stay inside the replay window; ";
-    }
-    if (shadowEstimatorEnabled) {
-        const auto shadowError = shadowEstimator.validationError();
-        if (!shadowError.empty()) {
-            errors << "shadow " << shadowError;
-        }
-        // The shadow may deliberately run a short window: reproducing the v1
-        // packet loss is the point of the comparison, so this is not an error.
     }
     if (mpc.horizon > 200) {
         errors << "horizon must be <= 200; ";
@@ -217,7 +188,6 @@ void DemoSettings::applyEstimatorMeasurementFromLidar() {
     constexpr double kMinimumLidarStd = 0.25 * kPi / 180.0;
     const double lidarStd = std::max(lidarNoiseStd, kMinimumLidarStd);
     articulationEstimator.measurementVariance = lidarStd * lidarStd;
-    shadowEstimator.measurementVariance = lidarStd * lidarStd;
 }
 
 DemoSession::DemoSession() {
@@ -605,58 +575,16 @@ DemoSettings DemoSession::defaultSettings() {
     return settings;
 }
 
-truck_model::ArticulationEstimatorConfig DemoSession::legacyFusionConfig() {
-    truck_model::ArticulationEstimatorConfig config;
-    config.processModel = truck_model::ArticulationProcessModel::kinematic;
-    config.compatibility.nearestFrameAlignment = true;
-    config.compatibility.diagonalEulerProcessNoise = true;
-    config.estimateLidarBias = true;
-    // v1 shipped a 0.4 s window, which has no margin at the specified 400 ms
-    // worst-case latency. Keeping it is what makes the comparison meaningful.
-    config.historyHorizon = 0.4;
-    config.lostTimeout = 0.4;
-    return config;
-}
-
 DemoSettings DemoSession::fusionComparisonSettings() {
     auto settings = defaultSettings();
     settings.lidarFusionEnabled = true;
+    // The nominal demo sensor, not a worst-case engineering one: a harsh scan
+    // makes every estimator look bad and hides the difference between them.
     settings.lidarPeriod = 0.1;
     settings.lidarDelayMin = 0.1;
-    settings.lidarDelayMax = 0.4;
-    // 4 degrees, the perception figure the handover document quotes.
-    settings.lidarNoiseStd = 0.0698131700798;
-    settings.ekfMeasurementFollowsLidar = true;
-    settings.initializeEstimatorFromTruth = false;
-    settings.inputYawRateNoiseStd = 0.005;
-    settings.inputSpeedNoiseStd = 0.2;
-    settings.adaptiveSpeedEnabled = false;
+    settings.lidarDelayMax = 0.3;
     settings.shadowEstimatorEnabled = true;
-    settings.shadowEstimator = legacyFusionConfig();
-    settings.applyEstimatorMeasurementFromLidar();
-    return settings;
-}
-
-DemoSettings DemoSession::modelComparisonSettings() {
-    auto settings = fusionComparisonSettings();
-    // Both sides use the v2 machinery; only the process model differs, which
-    // isolates the model from the out-of-sequence and noise changes.
-    settings.shadowEstimator = settings.articulationEstimator;
-    settings.shadowEstimator.processModel =
-        truck_model::ArticulationProcessModel::dynamic;
-    settings.applyEstimatorMeasurementFromLidar();
-    return settings;
-}
-
-DemoSettings DemoSession::fusionTrackingComparisonSettings() {
-    auto settings = fusionComparisonSettings();
-    settings.articulationTrackingExperiment = true;
-    settings.articulationReference.kind = ArticulationReferenceKind::sine;
-    settings.articulationReference.amplitude = 0.12;
-    settings.articulationReference.frequency = 0.12;
-    settings.articulationReference.duration = 40.0;
-    // Closing the loop on the estimate is the stress case: a thin phiDot is
-    // amplified by the controller instead of merely observed.
+    settings.shadowProcessModel = truck_model::ArticulationProcessModel::dynamic;
     settings.applyEstimatorMeasurementFromLidar();
     return settings;
 }
@@ -1045,7 +973,8 @@ void DemoSession::resetArticulationEstimator() {
     articulationEstimator_.reset(time_, seedArticulation);
     articulationEstimate_ = articulationEstimator_.estimate();
 
-    auto shadowConfig = settings_.shadowEstimator;
+    auto shadowConfig = settings_.articulationEstimator;
+    shadowConfig.processModel = settings_.shadowProcessModel;
     shadowEstimator_.configure(settings_.vehicle, shadowConfig);
     shadowEstimator_.reset(time_, seedArticulation);
     shadowEstimate_ = shadowEstimator_.estimate();
@@ -1065,8 +994,9 @@ double DemoSession::nextInputNormal() {
 truck_model::ArticulationInputs DemoSession::sensedInputs() {
     truck_model::ArticulationInputs inputs;
     inputs.time = time_;
-    inputs.truckYawRate = physicalState_[1] + settings_.inputYawRateBias +
-                          settings_.inputYawRateNoiseStd * nextInputNormal();
+    inputs.truckYawRate =
+        physicalState_[1] +
+        settings_.inputYawRateNoiseStd * nextInputNormal();
     inputs.speed =
         currentSpeed_ + settings_.inputSpeedNoiseStd * nextInputNormal();
     // A negative sensed speed would break the 1/U tyre terms in the scheduled
@@ -1089,10 +1019,8 @@ void DemoSession::captureDelayedLidar(double plantArticulation) {
     PendingLidar pending;
     pending.deliverTime = time_ + delay;
     pending.measurement.stamp = time_;
-    pending.measurement.articulation = plantArticulation +
-                                       settings_.lidarInstallationBias +
-                                       settings_.lidarNoiseStd * nextLidarNormal();
-    pending.measurement.id = nextLidarId_++;
+    pending.measurement.articulation =
+        plantArticulation + settings_.lidarNoiseStd * nextLidarNormal();
     pendingLidar_.push_back(pending);
     lastLidarScanTime_ = time_;
 }

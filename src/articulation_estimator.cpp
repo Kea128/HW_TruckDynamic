@@ -19,9 +19,8 @@ void requireValid(const Parameters& parameters) {
     }
 }
 
-// Folds an angle into (-pi, pi]. The upper bound is inclusive so that the
-// representation is unique; a bare pair of while loops would leave -pi and +pi
-// both reachable.
+// Folds an angle into (-pi, pi]. The upper bound is inclusive so the
+// representation is unique.
 double wrapAngle(double angle) {
     if (!std::isfinite(angle)) {
         return angle;
@@ -62,7 +61,6 @@ std::string ArticulationNoiseDensities::validationError() const {
     std::ostringstream errors;
     requirePositive(errors, articulationRate, "noiseDensity.articulationRate");
     requireNonnegative(errors, trailerYawBias, "noiseDensity.trailerYawBias");
-    requireNonnegative(errors, lidarBias, "noiseDensity.lidarBias");
     requireNonnegative(errors, truckYawRate, "noiseDensity.truckYawRate");
     requireNonnegative(errors, speed, "noiseDensity.speed");
     requireNonnegative(
@@ -85,8 +83,6 @@ std::string ArticulationEstimatorConfig::validationError() const {
         initialTrailerYawBiasVariance,
         "initialTrailerYawBiasVariance");
     requirePositive(
-        errors, initialLidarBiasVariance, "initialLidarBiasVariance");
-    requirePositive(
         errors,
         initialTruckLateralVelocityVariance,
         "initialTruckLateralVelocityVariance");
@@ -94,9 +90,6 @@ std::string ArticulationEstimatorConfig::validationError() const {
         errors, initialTrailerYawRateVariance, "initialTrailerYawRateVariance");
     requirePositive(errors, modelRefreshSpeedStep, "modelRefreshSpeedStep");
     requirePositive(errors, minimumModelSpeed, "minimumModelSpeed");
-    if (!std::isfinite(lidarBiasCalibration)) {
-        errors << "lidarBiasCalibration must be finite; ";
-    }
     if (consecutiveRejectLimit < 1) {
         errors << "consecutiveRejectLimit must be >= 1; ";
     }
@@ -117,7 +110,7 @@ double kinematicTrailerYawRate(
 }
 
 // ---------------------------------------------------------------------------
-// Kinematic (K5) process model
+// Kinematic (K5) process model: x = [phi, b_r2]
 // ---------------------------------------------------------------------------
 
 KinematicArticulationModel::KinematicArticulationModel(
@@ -125,8 +118,8 @@ KinematicArticulationModel::KinematicArticulationModel(
     ArticulationEstimatorConfig config)
     : parameters_(std::move(parameters)), config_(std::move(config)) {}
 
-Matrix<3, 3> KinematicArticulationModel::continuousJacobian(
-    const Vector<3>& state,
+Matrix<2, 2> KinematicArticulationModel::continuousJacobian(
+    const Vector<2>& state,
     const Inputs& inputs) const {
     const double length = trailerLength(parameters_);
     const double offset = hitchOffset(parameters_);
@@ -135,15 +128,15 @@ Matrix<3, 3> KinematicArticulationModel::continuousJacobian(
         (inputs.speed * std::cos(state[0]) -
          offset * inputs.truckYawRate * std::sin(state[0])) /
         length;
-    Matrix<3, 3> jacobian{};
+    Matrix<2, 2> jacobian{};
     jacobian[0][0] = -sensitivity;
     jacobian[0][1] = -1.0;
     return jacobian;
 }
 
 void KinematicArticulationModel::propagate(
-    Vector<3>& state,
-    Matrix<3, 3>& covariance,
+    Vector<2>& state,
+    Matrix<2, 2>& covariance,
     const Inputs& inputs,
     double dt,
     double processNoiseScale) const {
@@ -166,55 +159,43 @@ void KinematicArticulationModel::propagate(
     const double speedSensitivity = -std::sin(state[0]) / length;
 
     const auto& density = config_.noiseDensity;
-    Matrix<3, 3> continuousNoise{};
+    Matrix<2, 2> continuousNoise{};
     continuousNoise[0][0] =
         processNoiseScale * density.articulationRate +
         rateSensitivity * rateSensitivity * density.truckYawRate +
         speedSensitivity * speedSensitivity * density.speed;
     continuousNoise[1][1] = density.trailerYawBias;
-    continuousNoise[2][2] = config_.estimateLidarBias ? density.lidarBias : 0.0;
 
     // Euler mean; the transition below is the exact Jacobian of that map.
     state[0] = wrapAngle(state[0] + dt * (inputs.truckYawRate - trailerRate));
 
-    Matrix<3, 3> transition = identityMatrix<3>();
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
+    Matrix<2, 2> transition = identityMatrix<2>();
+    for (std::size_t row = 0; row < 2; ++row) {
+        for (std::size_t column = 0; column < 2; ++column) {
             transition[row][column] += dt * continuous[row][column];
         }
     }
 
-    Matrix<3, 3> discreteNoise{};
-    if (config_.compatibility.diagonalEulerProcessNoise) {
-        discreteNoise[0][0] =
-            processNoiseScale * density.articulationRate * dt +
-            dt * dt *
-                (rateSensitivity * rateSensitivity * density.truckYawRate +
-                 speedSensitivity * speedSensitivity * density.speed);
-        discreteNoise[1][1] = density.trailerYawBias * dt;
-        discreteNoise[2][2] = continuousNoise[2][2] * dt;
-    } else {
-        discreteNoise =
-            discretizeVanLoan(continuous, continuousNoise, dt).processNoise;
-    }
+    const auto discreteNoise =
+        discretizeVanLoan(continuous, continuousNoise, dt).processNoise;
 
     const auto left = matrixProduct(transition, covariance);
     covariance = matrixProduct(left, transposed(transition));
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
+    for (std::size_t row = 0; row < 2; ++row) {
+        for (std::size_t column = 0; column < 2; ++column) {
             covariance[row][column] += discreteNoise[row][column];
         }
     }
 }
 
 double KinematicArticulationModel::predictMeasurement(
-    const Vector<3>& state) const {
-    return wrapAngle(state[0] + state[2]);
+    const Vector<2>& state) const {
+    return wrapAngle(state[0]);
 }
 
-Vector<3> KinematicArticulationModel::measurementJacobian(
-    const Vector<3>&) const {
-    return {1.0, 0.0, 1.0};
+Vector<2> KinematicArticulationModel::measurementJacobian(
+    const Vector<2>&) const {
+    return {1.0, 0.0};
 }
 
 double KinematicArticulationModel::measurementVariance() const {
@@ -227,12 +208,12 @@ double KinematicArticulationModel::residual(
     return wrapAngle(measurement - predicted);
 }
 
-void KinematicArticulationModel::normalize(Vector<3>& state) const {
+void KinematicArticulationModel::normalize(Vector<2>& state) const {
     state[0] = wrapAngle(state[0]);
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic reduced-(K27) process model
+// Dynamic reduced-(K27) process model: x = [v_y1, r2, phi]
 // ---------------------------------------------------------------------------
 
 DynamicArticulationModel::DynamicArticulationModel(
@@ -253,7 +234,7 @@ void DynamicArticulationModel::refresh(double speed) const {
 
     // Rows 0 and 2 of the (K27) matrix are vy1Dot and r2Dot; row 1 (r1Dot) is
     // dropped because the truck yaw rate is measured and enters as an input.
-    continuous_ = Matrix<4, 4>{};
+    continuous_ = Matrix<3, 3>{};
     continuous_[0][0] = plant.a[0][0];
     continuous_[0][1] = plant.a[0][2];
     continuous_[0][2] = plant.a[0][3];
@@ -262,19 +243,19 @@ void DynamicArticulationModel::refresh(double speed) const {
     continuous_[1][2] = plant.a[2][3];
     continuous_[2][1] = -1.0;
 
-    inputYawRate_ = {plant.a[0][1], plant.a[2][1], 1.0, 0.0};
-    inputSteering_ = {plant.b[0], plant.b[2], 0.0, 0.0};
+    inputYawRate_ = {plant.a[0][1], plant.a[2][1], 1.0};
+    inputSteering_ = {plant.b[0], plant.b[2], 0.0};
     scheduledSpeed_ = scheduled;
 }
 
-Matrix<4, 4> DynamicArticulationModel::continuousJacobian(double speed) const {
+Matrix<3, 3> DynamicArticulationModel::continuousJacobian(double speed) const {
     refresh(speed);
     return continuous_;
 }
 
 void DynamicArticulationModel::propagate(
-    Vector<4>& state,
-    Matrix<4, 4>& covariance,
+    Vector<3>& state,
+    Matrix<3, 3>& covariance,
     const Inputs& inputs,
     double dt,
     double processNoiseScale) const {
@@ -286,32 +267,32 @@ void DynamicArticulationModel::propagate(
 
     // Exact zero-order hold: the model is linear once the speed is scheduled,
     // so the mean uses an augmented matrix exponential rather than Euler.
-    Matrix<6, 6> generator{};
-    for (std::size_t row = 0; row < 4; ++row) {
-        for (std::size_t column = 0; column < 4; ++column) {
+    Matrix<5, 5> generator{};
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
             generator[row][column] = continuous_[row][column] * dt;
         }
-        generator[row][4] = inputYawRate_[row] * dt;
-        generator[row][5] = inputSteering_[row] * dt;
+        generator[row][3] = inputYawRate_[row] * dt;
+        generator[row][4] = inputSteering_[row] * dt;
     }
     const auto expanded = matrixExponential(generator);
 
-    Matrix<4, 4> transition{};
-    Vector<4> yawRateGain{};
-    Vector<4> steeringGain{};
-    for (std::size_t row = 0; row < 4; ++row) {
-        for (std::size_t column = 0; column < 4; ++column) {
+    Matrix<3, 3> transition{};
+    Vector<3> yawRateGain{};
+    Vector<3> steeringGain{};
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
             transition[row][column] = expanded[row][column];
         }
-        yawRateGain[row] = expanded[row][4];
-        steeringGain[row] = expanded[row][5];
+        yawRateGain[row] = expanded[row][3];
+        steeringGain[row] = expanded[row][4];
     }
 
-    Vector<4> next{};
-    for (std::size_t row = 0; row < 4; ++row) {
+    Vector<3> next{};
+    for (std::size_t row = 0; row < 3; ++row) {
         double accumulated = yawRateGain[row] * inputs.truckYawRate +
                              steeringGain[row] * inputs.steering;
-        for (std::size_t column = 0; column < 4; ++column) {
+        for (std::size_t column = 0; column < 3; ++column) {
             accumulated += transition[row][column] * state[column];
         }
         next[row] = accumulated;
@@ -320,46 +301,38 @@ void DynamicArticulationModel::propagate(
     normalize(state);
 
     const auto& density = config_.noiseDensity;
-    Matrix<4, 4> continuousNoise{};
+    Matrix<3, 3> continuousNoise{};
     continuousNoise[0][0] = density.truckLateralVelocity;
     continuousNoise[1][1] = density.trailerYawRate;
     continuousNoise[2][2] = processNoiseScale * density.articulationRate;
-    continuousNoise[3][3] = config_.estimateLidarBias ? density.lidarBias : 0.0;
     // Truck yaw-rate sensor noise enters through the same column as the input.
-    for (std::size_t row = 0; row < 4; ++row) {
-        for (std::size_t column = 0; column < 4; ++column) {
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
             continuousNoise[row][column] +=
                 inputYawRate_[row] * density.truckYawRate * inputYawRate_[column];
         }
     }
 
-    Matrix<4, 4> discreteNoise{};
-    if (config_.compatibility.diagonalEulerProcessNoise) {
-        for (std::size_t i = 0; i < 4; ++i) {
-            discreteNoise[i][i] = continuousNoise[i][i] * dt;
-        }
-    } else {
-        discreteNoise =
-            discretizeVanLoan(continuous_, continuousNoise, dt).processNoise;
-    }
+    const auto discreteNoise =
+        discretizeVanLoan(continuous_, continuousNoise, dt).processNoise;
 
     const auto left = matrixProduct(transition, covariance);
     covariance = matrixProduct(left, transposed(transition));
-    for (std::size_t row = 0; row < 4; ++row) {
-        for (std::size_t column = 0; column < 4; ++column) {
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
             covariance[row][column] += discreteNoise[row][column];
         }
     }
 }
 
 double DynamicArticulationModel::predictMeasurement(
-    const Vector<4>& state) const {
-    return wrapAngle(state[2] + state[3]);
+    const Vector<3>& state) const {
+    return wrapAngle(state[2]);
 }
 
-Vector<4> DynamicArticulationModel::measurementJacobian(
-    const Vector<4>&) const {
-    return {0.0, 0.0, 1.0, 1.0};
+Vector<3> DynamicArticulationModel::measurementJacobian(
+    const Vector<3>&) const {
+    return {0.0, 0.0, 1.0};
 }
 
 double DynamicArticulationModel::measurementVariance() const {
@@ -372,7 +345,7 @@ double DynamicArticulationModel::residual(
     return wrapAngle(measurement - predicted);
 }
 
-void DynamicArticulationModel::normalize(Vector<4>& state) const {
+void DynamicArticulationModel::normalize(Vector<3>& state) const {
     state[2] = wrapAngle(state[2]);
 }
 
@@ -388,7 +361,6 @@ struct ArticulationEstimator::Impl {
     DelayedEkf<KinematicArticulationModel> kinematic;
     DelayedEkf<DynamicArticulationModel> dynamic;
     ArticulationEstimate estimate{};
-    std::uint64_t nextIdentifier{1};
     double lastAcceptedArrival{0.0};
     bool everAcceptedArrival{false};
     double resetTime{0.0};
@@ -403,22 +375,16 @@ struct ArticulationEstimator::Impl {
         value.mahalanobisGate = config.mahalanobisGate;
         value.consecutiveRejectLimit = config.consecutiveRejectLimit;
         value.lostTimeout = config.lostTimeout;
-        value.snapToNearestEntry =
-            config.compatibility.nearestFrameAlignment;
         return value;
     }
 
     void publish(const ArticulationInputs& inputs, double time) {
-        const double length = parameters.a2 + parameters.b2;
-        (void)length;
         double articulation = 0.0;
         double trailerRate = 0.0;
         double trailerBias = 0.0;
-        double lidarBias = 0.0;
         double lateralVelocity = 0.0;
         double variancePhi = 0.0;
         double varianceTrailer = 0.0;
-        double varianceLidar = 0.0;
         double informationAge = 0.0;
         double lastAccepted = 0.0;
         int rejects = 0;
@@ -437,30 +403,26 @@ struct ArticulationEstimator::Impl {
             lateralVelocity = state[0];
             trailerRate = state[1];
             articulation = state[2];
-            lidarBias = state[3];
             trailerBias = trailerRate - kinematicRate;
             variancePhi = covariance[2][2];
             varianceTrailer = covariance[1][1];
-            varianceLidar = covariance[3][3];
             informationAge = dynamic.informationAge();
             lastAccepted = dynamic.lastAcceptedStamp();
             rejects = dynamic.consecutiveRejects();
-            historySize = dynamic.timelineSize();
+            historySize = dynamic.frameCount();
             coasting = dynamic.coasting();
         } else {
             const auto& state = kinematic.state();
             const auto& covariance = kinematic.covariance();
             articulation = state[0];
             trailerBias = state[1];
-            lidarBias = state[2];
             trailerRate = kinematicRate + trailerBias;
             variancePhi = covariance[0][0];
             varianceTrailer = covariance[1][1];
-            varianceLidar = covariance[2][2];
             informationAge = kinematic.informationAge();
             lastAccepted = kinematic.lastAcceptedStamp();
             rejects = kinematic.consecutiveRejects();
-            historySize = kinematic.timelineSize();
+            historySize = kinematic.frameCount();
             coasting = kinematic.coasting();
         }
 
@@ -476,12 +438,10 @@ struct ArticulationEstimator::Impl {
         estimate.kinematicTrailerYawRate = kinematicRate;
         estimate.articulationRate = inputs.truckYawRate - trailerRate;
         estimate.trailerYawBias = trailerBias;
-        estimate.lidarBias = lidarBias;
         estimate.truckLateralVelocity = lateralVelocity;
         estimate.truckYawResidual = inputs.truckYawRate - bicycleYaw;
         estimate.covariancePhi = variancePhi;
         estimate.covarianceTrailerBias = varianceTrailer;
-        estimate.covarianceLidarBias = varianceLidar;
         estimate.informationAge = informationAge;
         estimate.lastAcceptedStamp = lastAccepted;
         estimate.consecutiveRejects = rejects;
@@ -524,7 +484,6 @@ void ArticulationEstimator::configure(
     impl_->configured = true;
     impl_->initialized = false;
     impl_->estimate = {};
-    impl_->nextIdentifier = 1;
     impl_->everAcceptedArrival = false;
 
     if (impl_->useDynamic()) {
@@ -552,23 +511,17 @@ void ArticulationEstimator::reset(double time, double articulation) {
     inputs.time = time;
 
     if (impl_->useDynamic()) {
-        Vector<4> state{0.0, 0.0, wrapAngle(articulation),
-                        config.lidarBiasCalibration};
-        Matrix<4, 4> covariance{};
+        Vector<3> state{0.0, 0.0, wrapAngle(articulation)};
+        Matrix<3, 3> covariance{};
         covariance[0][0] = config.initialTruckLateralVelocityVariance;
         covariance[1][1] = config.initialTrailerYawRateVariance;
         covariance[2][2] = config.initialArticulationVariance;
-        covariance[3][3] =
-            config.estimateLidarBias ? config.initialLidarBiasVariance : 0.0;
         impl_->dynamic.reset(time, state, covariance, inputs);
     } else {
-        Vector<3> state{wrapAngle(articulation), 0.0,
-                        config.lidarBiasCalibration};
-        Matrix<3, 3> covariance{};
+        Vector<2> state{wrapAngle(articulation), 0.0};
+        Matrix<2, 2> covariance{};
         covariance[0][0] = config.initialArticulationVariance;
         covariance[1][1] = config.initialTrailerYawBiasVariance;
-        covariance[2][2] =
-            config.estimateLidarBias ? config.initialLidarBiasVariance : 0.0;
         impl_->kinematic.reset(time, state, covariance, inputs);
     }
 
@@ -603,7 +556,7 @@ ArticulationEstimate ArticulationEstimator::predict(
     impl_->estimate.outcome = MeasurementOutcome::notInitialized;
     impl_->estimate.measurementAccepted = false;
     impl_->estimate.measurementGated = false;
-    impl_->estimate.replayedEntries = 0;
+    impl_->estimate.repropagatedFrames = 0;
     impl_->publish(inputs, inputs.time);
     return impl_->estimate;
 }
@@ -624,52 +577,41 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
         throw std::invalid_argument("lidar measurement must be finite");
     }
 
-    // Nearest-frame alignment is applied inside the shell, which owns the
-    // timeline. Doing it here would have to clamp an out-of-window stamp rather
-    // than drop it, which would hide the legacy filter's packet loss.
-    const double stamp = measurement.stamp;
-
-    const std::uint64_t identifier =
-        measurement.id != 0 ? measurement.id : impl_->nextIdentifier++;
-
     ArticulationInputs inputs;
     double now = 0.0;
-    typename DelayedEkf<KinematicArticulationModel>::MeasurementReport
-        kinematicReport;
-    typename DelayedEkf<DynamicArticulationModel>::MeasurementReport
-        dynamicReport;
-
     MeasurementOutcome outcome = MeasurementOutcome::notInitialized;
     double innovation = 0.0;
     double innovationCovariance = 0.0;
     double mahalanobis = 0.0;
     double alignedStamp = 0.0;
-    std::size_t replayed = 0;
-    Vector<3> kinematicGain{};
-    Vector<4> dynamicGain{};
+    std::size_t repropagated = 0;
+    double gainPhi = 0.0;
+    double gainBias = 0.0;
 
     if (impl_->useDynamic()) {
-        dynamicReport = impl_->dynamic.update(
-            stamp, measurement.articulation, identifier);
-        outcome = dynamicReport.outcome;
-        innovation = dynamicReport.innovation;
-        innovationCovariance = dynamicReport.innovationCovariance;
-        mahalanobis = dynamicReport.mahalanobis;
-        alignedStamp = dynamicReport.alignedStamp;
-        replayed = dynamicReport.replayedEntries;
-        dynamicGain = dynamicReport.gain;
+        const auto report = impl_->dynamic.update(
+            measurement.stamp, measurement.articulation);
+        outcome = report.outcome;
+        innovation = report.innovation;
+        innovationCovariance = report.innovationCovariance;
+        mahalanobis = report.mahalanobis;
+        alignedStamp = report.alignedStamp;
+        repropagated = report.repropagatedFrames;
+        gainPhi = report.gain[2];
+        gainBias = report.gain[1];
         inputs = impl_->dynamic.latestInputs();
         now = impl_->dynamic.time();
     } else {
-        kinematicReport = impl_->kinematic.update(
-            stamp, measurement.articulation, identifier);
-        outcome = kinematicReport.outcome;
-        innovation = kinematicReport.innovation;
-        innovationCovariance = kinematicReport.innovationCovariance;
-        mahalanobis = kinematicReport.mahalanobis;
-        alignedStamp = kinematicReport.alignedStamp;
-        replayed = kinematicReport.replayedEntries;
-        kinematicGain = kinematicReport.gain;
+        const auto report = impl_->kinematic.update(
+            measurement.stamp, measurement.articulation);
+        outcome = report.outcome;
+        innovation = report.innovation;
+        innovationCovariance = report.innovationCovariance;
+        mahalanobis = report.mahalanobis;
+        alignedStamp = report.alignedStamp;
+        repropagated = report.repropagatedFrames;
+        gainPhi = report.gain[0];
+        gainBias = report.gain[1];
         inputs = impl_->kinematic.latestInputs();
         now = impl_->kinematic.time();
     }
@@ -688,16 +630,9 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
     impl_->estimate.innovationCovariance = innovationCovariance;
     impl_->estimate.mahalanobis = mahalanobis;
     impl_->estimate.alignedStamp = alignedStamp;
-    impl_->estimate.replayedEntries = replayed;
-    if (impl_->useDynamic()) {
-        impl_->estimate.kalmanGainPhi = dynamicGain[2];
-        impl_->estimate.kalmanGainTrailerBias = dynamicGain[1];
-        impl_->estimate.kalmanGainLidarBias = dynamicGain[3];
-    } else {
-        impl_->estimate.kalmanGainPhi = kinematicGain[0];
-        impl_->estimate.kalmanGainTrailerBias = kinematicGain[1];
-        impl_->estimate.kalmanGainLidarBias = kinematicGain[2];
-    }
+    impl_->estimate.repropagatedFrames = repropagated;
+    impl_->estimate.kalmanGainPhi = gainPhi;
+    impl_->estimate.kalmanGainTrailerBias = gainBias;
     return impl_->estimate;
 }
 

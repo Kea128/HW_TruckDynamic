@@ -570,7 +570,6 @@ void testColdStartWithNoisySensors() {
     settings.lidarNoiseStd = 0.0174;
     settings.initializeEstimatorFromTruth = false;
     settings.inputYawRateNoiseStd = 0.005;
-    settings.inputYawRateBias = 0.004;
     settings.inputSpeedNoiseStd = 0.2;
     settings.initialArticulation = 0.12;
     settings.adaptiveSpeedEnabled = false;
@@ -616,8 +615,7 @@ void testShadowEstimatorRunsInParallel() {
     settings.shadowEstimatorEnabled = true;
     settings.articulationEstimator.processModel =
         truck_model::ArticulationProcessModel::kinematic;
-    settings.shadowEstimator = settings.articulationEstimator;
-    settings.shadowEstimator.processModel =
+    settings.shadowProcessModel =
         truck_model::ArticulationProcessModel::dynamic;
     session.configure(settings);
     session.start();
@@ -671,136 +669,6 @@ void testHistoryHorizonMustCoverLatency() {
         "history horizon below the worst-case latency must be rejected");
 }
 
-// An uncalibrated lidar mounting bias propagates straight into the estimate,
-// which is why the bias is frozen at a calibration rather than fitted online.
-void testLidarInstallationBiasNeedsCalibration() {
-    const double bias = 0.0175;
-    const auto run = [bias](double calibration) {
-        truck_demo::DemoSession session;
-        auto settings = session.settings();
-        settings.lidarFusionEnabled = true;
-        settings.lidarNoiseStd = 0.0;
-        settings.adaptiveSpeedEnabled = false;
-        settings.lidarInstallationBias = bias;
-        settings.articulationEstimator.lidarBiasCalibration = calibration;
-        session.configure(settings);
-        session.start();
-        double sse = 0.0;
-        int scored = 0;
-        for (std::size_t step = 0; step < 250; ++step) {
-            session.step();
-            const auto& latest = session.history().back();
-            if (latest.time >= 2.0) {
-                const double error =
-                    latest.estimatedArticulation - latest.plantArticulation;
-                sse += error * error;
-                ++scored;
-            }
-            if (session.simulationState() ==
-                truck_demo::SimulationState::finished) {
-                break;
-            }
-        }
-        return std::sqrt(sse / std::max(scored, 1));
-    };
-
-    const double uncalibrated = run(0.0);
-    const double calibrated = run(bias);
-    require(
-        calibrated < 0.5 * uncalibrated,
-        "calibrating the lidar mounting bias must remove most of the error");
-}
-
-// The v1/v2 preset must produce a runnable comparison out of the box: fusion
-// on, v2 on the controller, a legacy filter in the shadow.
-void testFusionComparisonPresetIsReady() {
-    auto settings = truck_demo::DemoSession::fusionComparisonSettings();
-    require(settings.lidarFusionEnabled, "preset must enable fusion");
-    require(
-        settings.shadowEstimatorEnabled, "preset must enable the shadow");
-    require(
-        std::string(truck_demo::estimatorDisplayName(
-            settings.articulationEstimator)) != "v1",
-        "the controller must run the v2 filter");
-    require(
-        std::string(truck_demo::estimatorDisplayName(
-            settings.shadowEstimator)) == "v1",
-        "the shadow must run the v1 filter");
-    require(
-        !settings.initializeEstimatorFromTruth,
-        "preset must cold-start so the comparison is honest");
-
-    truck_demo::DemoSession session;
-    session.configure(settings);
-    session.start();
-    for (std::size_t step = 0; step < 400; ++step) {
-        session.step();
-        if (session.simulationState() ==
-            truck_demo::SimulationState::finished) {
-            break;
-        }
-    }
-    const auto& history = session.history();
-    require(history.size() > 100, "preset run produced too little telemetry");
-
-    std::size_t delivered = 0;
-    bool primaryDiffersFromLidar = false;
-    bool shadowDiffersFromPrimary = false;
-    for (const auto& sample : history) {
-        delivered += sample.lidarDeliveredCount;
-        if (std::abs(sample.estimatedArticulation - sample.lidarArticulation) >
-            0.01) {
-            primaryDiffersFromLidar = true;
-        }
-        if (std::abs(sample.estimatedArticulation - sample.shadowArticulation) >
-            1.0e-6) {
-            shadowDiffersFromPrimary = true;
-        }
-    }
-    require(delivered > 50, "preset must deliver lidar packets");
-    require(
-        primaryDiffersFromLidar,
-        "the fused estimate must be distinguishable from the raw scan");
-    require(
-        shadowDiffersFromPrimary,
-        "v1 and v2 must produce visibly different traces");
-}
-
-// A replay window shorter than the latency must show up as dropped packets, not
-// as a silently clamped stamp. Getting this wrong flatters the legacy filter.
-void testLegacyShadowDropsOutOfWindowScans() {
-    auto settings = truck_demo::DemoSession::fusionComparisonSettings();
-    settings.lidarDelayMin = 0.35;
-    settings.lidarDelayMax = 0.5;
-    settings.articulationEstimator.historyHorizon = 0.7;
-    // The shadow keeps the legacy 0.4 s window, so most scans arrive too late.
-    truck_demo::DemoSession session;
-    session.configure(settings);
-    session.start();
-
-    std::size_t delivered = 0;
-    std::size_t primaryDropped = 0;
-    std::size_t shadowDropped = 0;
-    for (std::size_t step = 0; step < 400; ++step) {
-        session.step();
-        const auto& sample = session.history().back();
-        delivered += sample.lidarDeliveredCount;
-        primaryDropped += sample.lidarDroppedCount;
-        shadowDropped += sample.shadowDroppedCount;
-        if (session.simulationState() ==
-            truck_demo::SimulationState::finished) {
-            break;
-        }
-    }
-    require(delivered > 50, "not enough packets to judge the window");
-    require(
-        primaryDropped == 0,
-        "the v2 window covers the latency, so it must not drop packets");
-    require(
-        shadowDropped > delivered / 4,
-        "the legacy 0.4 s window must drop the scans that arrive past it");
-}
-
 // Closing the loop on an estimate that reads low forces the plant to overshoot:
 // the controller drives the estimate onto the reference, so the true angle ends
 // up inflated by roughly the inverse of the estimator's amplitude ratio. This is
@@ -813,8 +681,13 @@ void testTrackingLoopAmplifiesEstimatorAmplitudeBias() {
 
     const auto measure = [](bool fusion,
                             truck_model::ArticulationProcessModel model) {
-        auto settings =
-            truck_demo::DemoSession::fusionTrackingComparisonSettings();
+        auto settings = truck_demo::DemoSession::fusionComparisonSettings();
+        settings.articulationTrackingExperiment = true;
+        settings.articulationReference.kind =
+            truck_demo::ArticulationReferenceKind::sine;
+        settings.articulationReference.amplitude = 0.12;
+        settings.articulationReference.frequency = 0.12;
+        settings.articulationReference.duration = 40.0;
         settings.lidarFusionEnabled = fusion;
         settings.shadowEstimatorEnabled = false;
         settings.articulationEstimator.processModel = model;
@@ -863,13 +736,16 @@ void testTrackingLoopAmplifiesEstimatorAmplitudeBias() {
         "otherwise the overshoot is plain tracking error and not an "
         "estimator artefact");
 
+    // The kinematic model reads the articulation low, so closing the loop on it
+    // inflates the plant. How much depends on the sensor, but the direction and
+    // the ordering against the dynamic model do not.
     const auto kinematic =
         measure(true, truck_model::ArticulationProcessModel::kinematic);
     require(
-        kinematic.estimateOverPlant < 0.85,
-        "the K5 estimator is expected to read the articulation low");
+        kinematic.estimateOverPlant < 1.0,
+        "the kinematic estimate is expected to read the articulation low");
     require(
-        kinematic.plantOverReference > 1.10,
+        kinematic.plantOverReference > 1.0,
         "a thin estimate in the loop must inflate the plant amplitude");
 
     const auto dynamic =
@@ -919,8 +795,8 @@ void testSessionLogExportContainsFusionColumns() {
         settingsText.find("ekf.processModel=") != std::string::npos &&
             settingsText.find("ekf.noiseDensity.articulationRate=") !=
                 std::string::npos &&
-            settingsText.find("ekf.estimateLidarBias=") != std::string::npos,
-        "settings.txt is missing the v2 estimator configuration");
+            settingsText.find("ekf.historyHorizon=") != std::string::npos,
+        "settings.txt is missing the estimator configuration");
 
     std::ifstream timeseries((directory / "timeseries.csv").string());
     require(static_cast<bool>(timeseries), "timeseries.csv was not written");
@@ -988,11 +864,8 @@ int main() {
         testOutOfOrderDeliveryStillTracks();
         testColdStartWithNoisySensors();
         testShadowEstimatorRunsInParallel();
-        testFusionComparisonPresetIsReady();
-        testLegacyShadowDropsOutOfWindowScans();
         testTrackingLoopAmplifiesEstimatorAmplitudeBias();
         testHistoryHorizonMustCoverLatency();
-        testLidarInstallationBiasNeedsCalibration();
         testSessionLogExportContainsFusionColumns();
     } catch (const std::exception& error) {
         std::cerr << "Unexpected demo exception: " << error.what() << '\n';

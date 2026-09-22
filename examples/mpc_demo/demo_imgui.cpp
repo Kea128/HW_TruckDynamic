@@ -287,12 +287,8 @@ private:
         // The fusion comparison is the reason most people open the Studio, so
         // it gets a toolbar slot instead of living at the bottom of a long
         // scrolling parameter column.
-        if (ImGui::Button(u8"v1/v2 对比", ImVec2(96.0f, 36.0f))) {
+        if (ImGui::Button(u8"启用融合", ImVec2(88.0f, 36.0f))) {
             loadFusionComparison();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(u8"+铰接跟踪", ImVec2(88.0f, 36.0f))) {
-            loadFusionTrackingComparison();
         }
         ImGui::SameLine();
         const auto editorState = pathEditor_.state();
@@ -378,9 +374,9 @@ private:
             ImGui::TextColored(
                 ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
                 u8"| 融合 %s%s",
-                truck_demo::estimatorDisplayName(
-                    session_.settings().articulationEstimator),
-                session_.settings().shadowEstimatorEnabled ? u8" +影子" : "");
+                truck_demo::processModelName(
+                    session_.settings().articulationEstimator.processModel),
+                session_.settings().shadowEstimatorEnabled ? u8" +对照" : "");
         } else {
             ImGui::TextDisabled(u8"| 融合关闭");
         }
@@ -603,17 +599,6 @@ private:
             double lidarNoiseDegrees = degrees(draft_.lidarNoiseStd);
             property(u8"雷达噪声 [deg]", lidarNoiseDegrees, 0.1);
             draft_.lidarNoiseStd = radians(lidarNoiseDegrees);
-            double lidarBiasDegrees = degrees(draft_.lidarInstallationBias);
-            property(u8"雷达安装偏差 [deg]", lidarBiasDegrees, 0.1);
-            draft_.lidarInstallationBias = radians(lidarBiasDegrees);
-            double lidarBiasCalibrationDegrees =
-                degrees(draft_.articulationEstimator.lidarBiasCalibration);
-            property(u8"偏差标定值 [deg]", lidarBiasCalibrationDegrees, 0.1);
-            draft_.articulationEstimator.lidarBiasCalibration =
-                radians(lidarBiasCalibrationDegrees);
-            booleanProperty(
-                u8"在线估计雷达偏差",
-                draft_.articulationEstimator.estimateLidarBias);
             booleanProperty(
                 u8"R 跟随雷达噪声",
                 draft_.ekfMeasurementFollowsLidar);
@@ -634,11 +619,6 @@ private:
                 ekfTrailerBiasStdDegrees_,
                 0.01,
                 "%.3f");
-            property(
-                u8"Q_bphi 密度 [deg/√s]",
-                ekfLidarBiasStdDegrees_,
-                0.001,
-                "%.4f");
             ImGui::EndTable();
             ImGui::TextDisabled(
                 u8"R 为量测方差 (σ°)²。Q 为连续功率谱密度的平方根，\n"
@@ -649,9 +629,6 @@ private:
             double yawNoiseDegrees = degrees(draft_.inputYawRateNoiseStd);
             property(u8"横摆率噪声 [deg/s]", yawNoiseDegrees, 0.05, "%.3f");
             draft_.inputYawRateNoiseStd = radians(yawNoiseDegrees);
-            double yawBiasDegrees = degrees(draft_.inputYawRateBias);
-            property(u8"横摆率偏置 [deg/s]", yawBiasDegrees, 0.05, "%.3f");
-            draft_.inputYawRateBias = radians(yawBiasDegrees);
             property(
                 u8"车速噪声 [m/s]",
                 draft_.inputSpeedNoiseStd,
@@ -661,28 +638,13 @@ private:
                 u8"用 Plant 真值初始化",
                 draft_.initializeEstimatorFromTruth);
             booleanProperty(
-                u8"启用影子估计器",
+                u8"启用对照估计器",
                 draft_.shadowEstimatorEnabled);
-            // A single choice, because the two comparisons are different
-            // questions and mixing them produces a filter that never existed:
-            // v1 was always K5, so "v1 machinery + K27r" is not a real variant.
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(u8"影子对照对象");
-            ImGui::TableSetColumnIndex(1);
-            ImGui::SetNextItemWidth(-1.0f);
-            const char* shadowItems[] = {
-                u8"v1 旧滤波器", u8"v2 + 动力学 K27r"};
-            if (ImGui::Combo("##shadow_kind", &shadowKind_, shadowItems, 2)) {
-                draftDirty_ = true;
-            }
+            processModelProperty(
+                u8"对照过程模型", draft_.shadowProcessModel);
             ImGui::EndTable();
             ImGui::TextDisabled(
-                u8"影子估计器吃同样的事件但不进控制回路，仅用于对比。\n"
-                u8"选 v1：比的是机制（最近邻对齐 + 对角欧拉 Q + 在线偏置 + 0.4s 窗），\n"
-                u8"两边都用 K5，因为 v1 本来就没有动力学模型。\n"
-                u8"选 K27r：两边都是 v2 机制，只比过程模型。");
+                u8"对照估计器吃同样的数据但不进控制回路，只用来比较两种过程模型。");
         }
 
         ImGui::Spacing();
@@ -701,22 +663,10 @@ private:
             status_ = u8"已恢复默认车辆、控制器和 S 形路径";
         }
         if (accentButton(
-                u8"Delayed EKF：v1 与 v2 同场对比",
+                u8"启用铰接角雷达融合（含模型对照）",
                 ImVec2(-1.0f, 34.0f),
                 true)) {
             loadFusionComparison();
-        }
-        if (accentButton(
-                u8"过程模型对比：K5 与 动力学 K27r",
-                ImVec2(-1.0f, 34.0f),
-                true)) {
-            loadModelComparison();
-        }
-        if (accentButton(
-                u8"v1/v2 对比 + 铰接角跟踪（闭环）",
-                ImVec2(-1.0f, 34.0f),
-                true)) {
-            loadFusionTrackingComparison();
         }
         if (ImGui::Button(
                 u8"加载高曲率连续 S 弯（8 m/s）",
@@ -881,12 +831,6 @@ private:
             draft_.articulationEstimator.noiseDensity.articulationRate);
         ekfTrailerBiasStdDegrees_ = varianceToStdDegrees(
             draft_.articulationEstimator.noiseDensity.trailerYawBias);
-        ekfLidarBiasStdDegrees_ = varianceToStdDegrees(
-            draft_.articulationEstimator.noiseDensity.lidarBias);
-        const bool shadowIsLegacy =
-            draft_.shadowEstimator.compatibility.nearestFrameAlignment ||
-            draft_.shadowEstimator.compatibility.diagonalEulerProcessNoise;
-        shadowKind_ = shadowIsLegacy ? 0 : 1;
         draftDirty_ = false;
         error_.clear();
     }
@@ -911,22 +855,6 @@ private:
             stdDegreesToVariance(ekfPhiProcessStdDegrees_);
         draft_.articulationEstimator.noiseDensity.trailerYawBias =
             stdDegreesToVariance(ekfTrailerBiasStdDegrees_);
-        draft_.articulationEstimator.noiseDensity.lidarBias =
-            stdDegreesToVariance(ekfLidarBiasStdDegrees_);
-
-        // v1 is a whole filter, not a model switch: it forces K5 along with the
-        // legacy machinery. The other choice keeps the primary's tuning and
-        // changes only the process model.
-        if (shadowKind_ == 0) {
-            draft_.shadowEstimator =
-                truck_demo::DemoSession::legacyFusionConfig();
-            draft_.shadowEstimator.processModel =
-                truck_model::ArticulationProcessModel::kinematic;
-        } else {
-            draft_.shadowEstimator = draft_.articulationEstimator;
-            draft_.shadowEstimator.processModel =
-                truck_model::ArticulationProcessModel::dynamic;
-        }
     }
 
     void applyDraft() {
@@ -942,9 +870,9 @@ private:
         }
     }
 
-    // One click to the configuration the fusion comparison needs: fusion on,
-    // engineering lidar noise and latency, v2 driving the controller and v1
-    // running alongside it in the shadow.
+    // One click to a runnable fusion scenario: the nominal demo sensor, the
+    // estimate driving the controller, and the other process model running
+    // alongside for comparison.
     void loadFusionComparison() {
         try {
             auto settings = truck_demo::DemoSession::fusionComparisonSettings();
@@ -957,55 +885,8 @@ private:
             simulationAccumulator_ = 0.0;
             autoExportedThisRun_ = false;
             status_ =
-                u8"已加载 v1/v2 对比：雷达 4°、时延 0.1-0.4 s，"
-                u8"蓝线 v2 进控制回路，橙线 v1 仅旁路。点运行。";
-        } catch (const std::exception& exception) {
-            error_ = exception.what();
-        }
-    }
-
-    // Same v2 machinery on both sides, only the process model differs. This is
-    // the question "is the dynamic model worth it", separate from "is v2 worth
-    // it", which the v1 comparison answers.
-    void loadModelComparison() {
-        try {
-            auto settings = truck_demo::DemoSession::modelComparisonSettings();
-            settings.vehicle = session_.settings().vehicle;
-            settings.mpc = session_.settings().mpc;
-            session_.configure(settings);
-            session_.setPath(truck_demo::DemoSession::defaultPath());
-            syncDraft();
-            fitRequested_ = true;
-            simulationAccumulator_ = 0.0;
-            autoExportedThisRun_ = false;
-            status_ =
-                u8"已加载过程模型对比：两边都是 v2 机制，"
-                u8"蓝线 K5 进控制回路，橙线 K27r 仅旁路。点运行。";
-        } catch (const std::exception& exception) {
-            error_ = exception.what();
-        }
-    }
-
-    // The fusion comparison with the controller closing the loop on phi_ref, so
-    // an estimator's thin phiDot becomes a tracking error instead of a curve
-    // that merely looks different.
-    void loadFusionTrackingComparison() {
-        try {
-            auto settings =
-                truck_demo::DemoSession::fusionTrackingComparisonSettings();
-            settings.vehicle = session_.settings().vehicle;
-            settings.mpc = session_.settings().mpc;
-            session_.configure(settings);
-            session_.setPath(
-                truck_demo::curvatureWavePath(0.0, 80.0, 260.0));
-            session_.beginArticulationTrackingExperiment();
-            syncDraft();
-            fitRequested_ = true;
-            simulationAccumulator_ = 0.0;
-            autoExportedThisRun_ = false;
-            status_ =
-                u8"已加载 v1/v2 + 铰接角跟踪：路径权重置零，转角去跟 phi_ref，"
-                u8"反馈用估计值。点运行。";
+                u8"已启用铰接角融合：绿线 Plant 真值，蓝线进控制回路的估计，"
+                u8"橙线对照过程模型，灰紫为雷达原始。点运行。";
         } catch (const std::exception& exception) {
             error_ = exception.what();
         }
@@ -1862,9 +1743,6 @@ private:
     double ekfMeasurementStdDegrees_{1.0};
     double ekfPhiProcessStdDegrees_{3.0};
     double ekfTrailerBiasStdDegrees_{0.81};
-    double ekfLidarBiasStdDegrees_{0.0018};
-    // 0 = compare against the v1 filter, 1 = compare against the K27r model.
-    int shadowKind_{};
     bool draftDirty_{};
     bool drawingReference_{};
     std::vector<truck_demo::TimeArticulationPoint> drawnRawPoints_;

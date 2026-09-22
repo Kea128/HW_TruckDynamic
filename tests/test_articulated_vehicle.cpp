@@ -598,20 +598,20 @@ void testKinematicJacobianMatchesFiniteDifference() {
     inputs.speed = 13.0;
     const double dt = 0.05;
 
-    const truck_model::Vector<3> base{0.21, 0.013, 0.0};
+    const truck_model::Vector<2> base{0.21, 0.013};
     const auto analytic = model.continuousJacobian(base, inputs);
 
     constexpr double step = 1.0e-6;
-    for (std::size_t column = 0; column < 3; ++column) {
+    for (std::size_t column = 0; column < 2; ++column) {
         auto forward = base;
         auto backward = base;
         forward[column] += step;
         backward[column] -= step;
-        truck_model::Matrix<3, 3> ignored{};
+        truck_model::Matrix<2, 2> ignored{};
         model.propagate(forward, ignored, inputs, dt, 1.0);
-        truck_model::Matrix<3, 3> ignoredToo{};
+        truck_model::Matrix<2, 2> ignoredToo{};
         model.propagate(backward, ignoredToo, inputs, dt, 1.0);
-        for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t row = 0; row < 2; ++row) {
             const double numeric =
                 (forward[row] - backward[row]) / (2.0 * step);
             const double expected =
@@ -657,8 +657,9 @@ std::size_t observabilityRank(
     return rank;
 }
 
-// Estimating the lidar bias online leaves the kinematic model rank deficient at
-// a frozen operating point; freezing the bias restores full rank.
+// With the angle and the trailer yaw residual as the only states, the pair is
+// observable at any operating point: det([[1,0],[-a,-1]]) = -1, independent of
+// speed and of the articulation angle.
 void testKinematicObservabilityRank() {
     const auto p = parameters();
     truck_model::ArticulationEstimatorConfig config;
@@ -667,36 +668,27 @@ void testKinematicObservabilityRank() {
     truck_model::ArticulationInputs inputs;
     inputs.truckYawRate = 0.05;
     inputs.speed = 15.0;
-    const truck_model::Vector<3> state{0.08, 0.0, 0.0};
+    const truck_model::Vector<2> state{0.08, 0.0};
     const auto a = model.continuousJacobian(state, inputs);
 
-    // Rows of the observability matrix for H = [1, 0, 1].
-    std::vector<double> h{1.0, 0.0, 1.0};
+    // Rows of the observability matrix for H = [1, 0].
+    std::vector<double> h{1.0, 0.0};
     std::vector<std::vector<double>> rows;
     rows.push_back(h);
-    for (int power = 0; power < 2; ++power) {
-        std::vector<double> next(3, 0.0);
-        for (std::size_t column = 0; column < 3; ++column) {
-            for (std::size_t k = 0; k < 3; ++k) {
-                next[column] += h[k] * a[k][column];
-            }
+    std::vector<double> next(2, 0.0);
+    for (std::size_t column = 0; column < 2; ++column) {
+        for (std::size_t k = 0; k < 2; ++k) {
+            next[column] += h[k] * a[k][column];
         }
-        rows.push_back(next);
-        h = next;
     }
+    rows.push_back(next);
     require(
         observabilityRank(rows, 1.0e-9) == 2,
-        "three-state kinematic model must be rank deficient at a frozen point");
-
-    // Freezing the bias removes the third column and the pair becomes
-    // observable: det([[1,0],[-a,-1]]) = -1.
-    std::vector<std::vector<double>> reduced;
-    for (const auto& row : rows) {
-        reduced.push_back({row[0], row[1]});
-    }
-    require(
-        observabilityRank(reduced, 1.0e-9) == 2,
         "two-state kinematic model must be observable");
+    expectNear(
+        rows[0][0] * rows[1][1] - rows[0][1] * rows[1][0],
+        -1.0,
+        "observability determinant must be exactly -1");
 }
 
 // The reduced (K27) model is observable through a31, the sensitivity of the
@@ -738,72 +730,9 @@ void testDynamicObservabilityRank() {
         "reduced K27 model must be observable in its physical states");
 }
 
-struct ScanPacket {
-    double stamp{};
-    double value{};
-    std::uint64_t id{};
-};
-
-// Runs a fixed input sequence, delivering the scans in the given arrival order.
-truck_model::ArticulationEstimate runScanOrder(
-    const std::vector<ScanPacket>& packets,
-    const std::vector<std::size_t>& arrivalOrder,
-    double deliverTime) {
-    const auto p = parameters();
-    truck_model::ArticulationEstimatorConfig config;
-    config.historyHorizon = 1.2;
-    truck_model::ArticulationEstimator estimator(p, config);
-    estimator.reset(0.0, 0.05);
-
-    std::size_t delivered = 0;
-    for (int step = 1; step <= 40; ++step) {
-        truck_model::ArticulationInputs inputs;
-        inputs.time = 0.05 * static_cast<double>(step);
-        inputs.truckYawRate = 0.04 + 0.01 * std::sin(0.4 * inputs.time);
-        inputs.speed = 12.0;
-        estimator.predict(inputs);
-
-        if (inputs.time >= deliverTime && delivered < arrivalOrder.size()) {
-            while (delivered < arrivalOrder.size()) {
-                const auto& packet = packets[arrivalOrder[delivered]];
-                truck_model::ArticulationLidarMeasurement measurement;
-                measurement.stamp = packet.stamp;
-                measurement.articulation = packet.value;
-                measurement.id = packet.id;
-                estimator.updateLidar(measurement);
-                ++delivered;
-            }
-        }
-    }
-    return estimator.estimate();
-}
-
-// The posterior must depend on the set of events, not on the order they arrive.
-void testReplayIsArrivalOrderIndependent() {
-    const std::vector<ScanPacket> packets{
-        {0.30, 0.061, 1}, {0.40, 0.058, 2}, {0.50, 0.054, 3}};
-
-    const auto inOrder = runScanOrder(packets, {0, 1, 2}, 0.75);
-    const auto reversed = runScanOrder(packets, {2, 1, 0}, 0.75);
-    const auto shuffled = runScanOrder(packets, {1, 2, 0}, 0.75);
-
-    expectNear(
-        reversed.articulation,
-        inOrder.articulation,
-        "reversed arrival order must not change the posterior");
-    expectNear(
-        shuffled.articulation,
-        inOrder.articulation,
-        "shuffled arrival order must not change the posterior");
-    expectNear(
-        reversed.covariancePhi,
-        inOrder.covariancePhi,
-        "reversed arrival order must not change the covariance");
-}
-
-// A late packet must not erase a correction that was already fused at a newer
-// stamp; that regression is what the event replay exists to prevent.
-void testLateScanPreservesNewerCorrection() {
+// Successive delayed scans must each be fused at their own stamp, and a stamp
+// older than one already fused must be refused rather than misapplied.
+void testDelayedScanOrdering() {
     const auto p = parameters();
     truck_model::ArticulationEstimatorConfig config;
     config.historyHorizon = 1.2;
@@ -821,23 +750,32 @@ void testLateScanPreservesNewerCorrection() {
     truck_model::ArticulationLidarMeasurement recent;
     recent.stamp = 0.80;
     recent.articulation = 0.12;
-    recent.id = 1;
     const auto afterRecent = estimator.updateLidar(recent);
     require(afterRecent.measurementAccepted, "recent scan must be accepted");
     const double corrected = afterRecent.articulation;
 
-    truck_model::ArticulationLidarMeasurement late;
-    late.stamp = 0.60;
-    late.articulation = 0.118;
-    late.id = 2;
-    const auto afterLate = estimator.updateLidar(late);
-    require(afterLate.measurementAccepted, "late scan must be accepted");
-
-    // Both scans agree, so fusing the late one must keep the estimate near the
-    // corrected value rather than reverting toward the uncorrected prediction.
+    // The shell is only correct while stamps are non-decreasing, so it checks
+    // rather than assumes. A reordering pipeline shows up as a counter instead
+    // of a silently corrupted state.
+    truck_model::ArticulationLidarMeasurement stale;
+    stale.stamp = 0.60;
+    stale.articulation = 0.02;
+    const auto afterStale = estimator.updateLidar(stale);
     require(
-        std::abs(afterLate.articulation - corrected) < 0.02,
-        "late scan must not discard the newer correction");
+        afterStale.outcome == truck_model::MeasurementOutcome::outOfOrder,
+        "a scan older than one already fused must be reported as out of order");
+    expectNear(
+        afterStale.articulation,
+        corrected,
+        "a rejected out-of-order scan must not move the estimate");
+
+    truck_model::ArticulationLidarMeasurement repeat;
+    repeat.stamp = 0.80;
+    repeat.articulation = 0.12;
+    require(
+        estimator.updateLidar(repeat).outcome ==
+            truck_model::MeasurementOutcome::duplicate,
+        "the same stamp twice must be reported as a duplicate");
 }
 
 void testMeasurementBoundaryHandling() {
@@ -857,7 +795,6 @@ void testMeasurementBoundaryHandling() {
     truck_model::ArticulationLidarMeasurement stale;
     stale.stamp = 0.10;
     stale.articulation = 0.01;
-    stale.id = 11;
     require(
         estimator.updateLidar(stale).outcome ==
             truck_model::MeasurementOutcome::staleBeyondWindow,
@@ -866,7 +803,6 @@ void testMeasurementBoundaryHandling() {
     truck_model::ArticulationLidarMeasurement future;
     future.stamp = 1.30;
     future.articulation = 0.01;
-    future.id = 12;
     require(
         estimator.updateLidar(future).outcome ==
             truck_model::MeasurementOutcome::aheadOfInputs,
@@ -875,7 +811,6 @@ void testMeasurementBoundaryHandling() {
     truck_model::ArticulationLidarMeasurement good;
     good.stamp = 0.90;
     good.articulation = 0.012;
-    good.id = 13;
     require(
         estimator.updateLidar(good).outcome ==
             truck_model::MeasurementOutcome::accepted,
@@ -904,7 +839,6 @@ void testSubFrameAlignmentIsExact() {
         truck_model::ArticulationLidarMeasurement measurement;
         measurement.stamp = 0.50 + phase;
         measurement.articulation = 0.05;
-        measurement.id = 1;
         const auto report = estimator.updateLidar(measurement);
         require(
             report.measurementAccepted,
@@ -914,42 +848,6 @@ void testSubFrameAlignmentIsExact() {
             measurement.stamp,
             "sub-frame scan must align to its own stamp, not a stored frame");
     }
-}
-
-// A frozen lidar bias must stay at its calibration value and contribute no gain.
-void testFrozenLidarBiasStaysCalibrated() {
-    const auto p = parameters();
-    truck_model::ArticulationEstimatorConfig config;
-    config.estimateLidarBias = false;
-    config.lidarBiasCalibration = 0.02;
-    truck_model::ArticulationEstimator estimator(p, config);
-    estimator.reset(0.0, 0.0);
-    for (int step = 1; step <= 30; ++step) {
-        truck_model::ArticulationInputs inputs;
-        inputs.time = 0.05 * static_cast<double>(step);
-        inputs.truckYawRate = 0.04;
-        inputs.speed = 12.0;
-        estimator.predict(inputs);
-        if (step % 2 == 0) {
-            truck_model::ArticulationLidarMeasurement measurement;
-            measurement.stamp = inputs.time;
-            measurement.articulation = 0.09;
-            measurement.id = static_cast<std::uint64_t>(step);
-            estimator.updateLidar(measurement);
-        }
-    }
-    expectNear(
-        estimator.estimate().lidarBias,
-        0.02,
-        "frozen lidar bias must not drift");
-    expectNear(
-        estimator.estimate().kalmanGainLidarBias,
-        0.0,
-        "frozen lidar bias must receive no gain");
-    expectNear(
-        estimator.estimate().covarianceLidarBias,
-        0.0,
-        "frozen lidar bias must keep zero variance");
 }
 
 // Truth for the latency benchmark comes from the (K27) plant, not from the
@@ -1054,7 +952,6 @@ TrackingScore scoreEstimator(
             measurement.stamp = trace.time[scanIndex];
             measurement.articulation =
                 trace.articulation[scanIndex] + noiseStd * gaussian();
-            measurement.id = static_cast<std::uint64_t>(index);
             estimator.updateLidar(measurement);
             lastDelivered = measurement.articulation;
             hasDelivered = true;
@@ -1205,11 +1102,9 @@ int main() {
     testKinematicJacobianMatchesFiniteDifference();
     testKinematicObservabilityRank();
     testDynamicObservabilityRank();
-    testReplayIsArrivalOrderIndependent();
-    testLateScanPreservesNewerCorrection();
+    testDelayedScanOrdering();
     testMeasurementBoundaryHandling();
     testSubFrameAlignmentIsExact();
-    testFrozenLidarBiasStaysCalibrated();
     testDynamicModelImprovesRateTracking();
     testDynamicModelSurvivesParameterMismatch();
     testBothModelsBeatDelayedMeasurement();

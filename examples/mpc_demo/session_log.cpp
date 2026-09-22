@@ -140,10 +140,8 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "lidarDelayMin", settings.lidarDelayMin);
     writeKey(out, "lidarDelayMax", settings.lidarDelayMax);
     writeKey(out, "lidarNoiseStd", settings.lidarNoiseStd);
-    writeKey(out, "lidarInstallationBias", settings.lidarInstallationBias);
     writeKey(out, "lidarRandomSeed", static_cast<int>(settings.lidarRandomSeed));
     writeKey(out, "inputYawRateNoiseStd", settings.inputYawRateNoiseStd);
-    writeKey(out, "inputYawRateBias", settings.inputYawRateBias);
     writeKey(out, "inputSpeedNoiseStd", settings.inputSpeedNoiseStd);
     writeKey(out, "inputRandomSeed", static_cast<int>(settings.inputRandomSeed));
     writeKey(
@@ -153,27 +151,8 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "shadowEstimatorEnabled", settings.shadowEstimatorEnabled);
     writeKey(
         out,
-        "shadow.label",
-        std::string(estimatorDisplayName(settings.shadowEstimator)));
-    writeKey(
-        out,
         "shadow.processModel",
-        std::string(processModelName(settings.shadowEstimator.processModel)));
-    writeKey(
-        out, "shadow.historyHorizon", settings.shadowEstimator.historyHorizon);
-    writeKey(
-        out,
-        "shadow.estimateLidarBias",
-        settings.shadowEstimator.estimateLidarBias);
-    writeKey(
-        out,
-        "shadow.compatibility.nearestFrameAlignment",
-        settings.shadowEstimator.compatibility.nearestFrameAlignment);
-    writeKey(
-        out,
-        "shadow.compatibility.diagonalEulerProcessNoise",
-        settings.shadowEstimator.compatibility.diagonalEulerProcessNoise);
-    writeKey(out, "ekf.label", std::string(estimatorDisplayName(ekf)));
+        std::string(processModelName(settings.shadowProcessModel)));
     writeKey(
         out,
         "ekf.processModel",
@@ -190,7 +169,6 @@ std::string settingsText(const DemoSession& session) {
         out,
         "ekf.noiseDensity.trailerYawBias",
         ekf.noiseDensity.trailerYawBias);
-    writeKey(out, "ekf.noiseDensity.lidarBias", ekf.noiseDensity.lidarBias);
     writeKey(out, "ekf.noiseDensity.truckYawRate", ekf.noiseDensity.truckYawRate);
     writeKey(out, "ekf.noiseDensity.speed", ekf.noiseDensity.speed);
     writeKey(
@@ -201,8 +179,6 @@ std::string settingsText(const DemoSession& session) {
         out,
         "ekf.noiseDensity.trailerYawRate",
         ekf.noiseDensity.trailerYawRate);
-    writeKey(out, "ekf.estimateLidarBias", ekf.estimateLidarBias);
-    writeKey(out, "ekf.lidarBiasCalibration", ekf.lidarBiasCalibration);
     writeKey(out, "ekf.mahalanobisGate", ekf.mahalanobisGate);
     writeKey(out, "ekf.consecutiveRejectLimit", ekf.consecutiveRejectLimit);
     writeKey(out, "ekf.lostTimeout", ekf.lostTimeout);
@@ -216,8 +192,6 @@ std::string settingsText(const DemoSession& session) {
         "ekf.initialTrailerYawBiasVariance",
         ekf.initialTrailerYawBiasVariance);
     writeKey(
-        out, "ekf.initialLidarBiasVariance", ekf.initialLidarBiasVariance);
-    writeKey(
         out,
         "ekf.initialTruckLateralVelocityVariance",
         ekf.initialTruckLateralVelocityVariance);
@@ -225,14 +199,6 @@ std::string settingsText(const DemoSession& session) {
         out,
         "ekf.initialTrailerYawRateVariance",
         ekf.initialTrailerYawRateVariance);
-    writeKey(
-        out,
-        "ekf.compatibility.nearestFrameAlignment",
-        ekf.compatibility.nearestFrameAlignment);
-    writeKey(
-        out,
-        "ekf.compatibility.diagonalEulerProcessNoise",
-        ekf.compatibility.diagonalEulerProcessNoise);
     writeKey(out, "scheduledModelSpeed", session.scheduledModelSpeed());
     writeKey(out, "sampleCount", session.history().size());
     if (session.controller() != nullptr) {
@@ -260,10 +226,10 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
         << "delta,delta_unconstrained,"
         << "speed,planned_speed,cruise_speed,scheduled_model_speed,models_rebuilt,"
         << "rho,rho_dot,phi_ref,phi_ref_dot,phi_tracking_error,"
-        << "ekf_phi,ekf_phi_dot,ekf_r2,ekf_r2_kin,ekf_b_r2,ekf_b_phi,"
-        << "ekf_vy1,ekf_truck_yaw_residual,ekf_P_phi,ekf_P_br2,ekf_P_bphi,"
+        << "ekf_phi,ekf_phi_dot,ekf_r2,ekf_r2_kin,ekf_b_r2,"
+        << "ekf_vy1,ekf_truck_yaw_residual,ekf_P_phi,ekf_P_br2,"
         << "ekf_innovation,ekf_S,ekf_mahalanobis,"
-        << "ekf_K_phi,ekf_K_br2,ekf_K_bphi,"
+        << "ekf_K_phi,ekf_K_br2,"
         << "ekf_history_size,ekf_replayed,ekf_aligned_stamp,"
         << "ekf_last_accepted_stamp,ekf_information_age,ekf_arrival_gap,"
         << "ekf_consecutive_rejects,ekf_accepted,ekf_gated,ekf_coasting,"
@@ -300,14 +266,14 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
             << sample.estimatedArticulation << ','
             << sample.estimatedArticulationRate << ','
             << e.trailerYawRate << ',' << e.kinematicTrailerYawRate << ','
-            << e.trailerYawBias << ',' << e.lidarBias << ','
+            << e.trailerYawBias << ','
             << e.truckLateralVelocity << ',' << e.truckYawResidual << ','
             << e.covariancePhi << ','
-            << e.covarianceTrailerBias << ',' << e.covarianceLidarBias << ','
+            << e.covarianceTrailerBias << ','
             << e.innovation << ',' << e.innovationCovariance << ','
             << e.mahalanobis << ',' << e.kalmanGainPhi << ','
-            << e.kalmanGainTrailerBias << ',' << e.kalmanGainLidarBias << ','
-            << e.historySize << ',' << e.replayedEntries << ','
+            << e.kalmanGainTrailerBias << ','
+            << e.historySize << ',' << e.repropagatedFrames << ','
             << e.alignedStamp << ','
             << e.lastAcceptedStamp << ',' << e.informationAge << ','
             << e.arrivalGap << ',' << e.consecutiveRejects << ','

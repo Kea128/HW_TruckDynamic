@@ -4,7 +4,6 @@
 #include "truck_model/delayed_ekf.hpp"
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -21,20 +20,17 @@ struct ArticulationLidarMeasurement {
     // Scan instant, never the arrival instant.
     double stamp{};
     double articulation{};
-    // Optional de-duplication key. Zero means "no identifier"; the estimator
-    // then assigns a monotonic one on arrival.
-    std::uint64_t id{};
 };
 
 enum class ArticulationProcessModel {
-    // Three states [phi, b_r2, b_phi] driven by the (K5) rolling kinematics.
-    // Needs only wheelbases, so it is insensitive to load and tyre data, but it
-    // models the trailer sideslip residual as a random walk.
+    // Two states [phi, b_r2] driven by the (K5) rolling kinematics. Needs only
+    // wheelbases, so it is insensitive to load and tyre data, but it models the
+    // trailer sideslip residual as a random walk.
     kinematic,
-    // Four states [v_y1, r2, phi, b_phi] built from the (K27) lateral dynamics
-    // with the measured truck yaw rate as an input. Resolves the residual
-    // dynamics that the random walk cannot follow, at the cost of depending on
-    // trailer mass, inertia and cornering stiffness.
+    // Three states [v_y1, r2, phi] built from the (K27) lateral dynamics with
+    // the measured truck yaw rate as an input. Resolves the residual dynamics
+    // the random walk cannot follow, at the cost of depending on trailer mass,
+    // inertia and cornering stiffness.
     dynamic
 };
 
@@ -46,8 +42,6 @@ struct ArticulationNoiseDensities {
     double articulationRate{2.741556778080377e-3};
     // Trailer yaw residual random walk. [rad^2/s^3]
     double trailerYawBias{2.0e-4};
-    // Lidar mounting-bias drift. [rad^2/s]
-    double lidarBias{1.0e-10};
     // Truck yaw-rate sensor noise entering phiDot. [rad^2/s]
     double truckYawRate{2.741556778080377e-5};
     // Speed sensor noise entering phiDot. [m^2/s]
@@ -64,31 +58,14 @@ struct ArticulationNoiseDensities {
     [[nodiscard]] std::string validationError() const;
 };
 
-// Reproduces the pre-v2 filter for comparison against archived runs. Every flag
-// defaults to the corrected behaviour.
-struct ArticulationCompatibility {
-    // Snap a scan to the closest stored entry instead of splitting the interval
-    // at the scan stamp. Costs up to half an input period of alignment error.
-    bool nearestFrameAlignment{false};
-    // Diagonal Euler process noise instead of Van Loan. Drops the phi/bias
-    // cross-covariance and the cubic bias term.
-    bool diagonalEulerProcessNoise{false};
-};
-
 struct ArticulationEstimatorConfig {
     ArticulationProcessModel processModel{ArticulationProcessModel::kinematic};
 
-    // Must exceed the largest scan latency plus one control period. The former
-    // 0.4 s default had no margin at the specified 400 ms worst case.
+    // Must be at least the largest scan latency plus one control period, or
+    // late packets fall outside the replay window and are discarded.
     double historyHorizon{0.55};
     double measurementVariance{3.046174197867086e-4};
     ArticulationNoiseDensities noiseDensity{};
-
-    // The lidar bias is not independently observable at a steady operating
-    // point, so it is a frozen calibration by default. Enabling estimation
-    // restores the rank-deficient three-state design.
-    bool estimateLidarBias{false};
-    double lidarBiasCalibration{0.0};
 
     double mahalanobisGate{9.0};
     int consecutiveRejectLimit{3};
@@ -99,15 +76,12 @@ struct ArticulationEstimatorConfig {
 
     double initialArticulationVariance{1.2180736252517745e-3};
     double initialTrailerYawBiasVariance{1.2180736252517745e-3};
-    double initialLidarBiasVariance{2.741556778080377e-5};
     double initialTruckLateralVelocityVariance{0.25};
     double initialTrailerYawRateVariance{1.2180736252517745e-3};
 
     // Rebuild the speed-scheduled (K27) matrices once the speed moves this far.
     double modelRefreshSpeedStep{0.25};
     double minimumModelSpeed{0.5};
-
-    ArticulationCompatibility compatibility{};
 
     [[nodiscard]] std::string validationError() const;
 };
@@ -120,19 +94,16 @@ struct ArticulationEstimate {
     double kinematicTrailerYawRate{};
     double truckYawResidual{};
     double trailerYawBias{};
-    double lidarBias{};
     double truckLateralVelocity{};
 
     double covariancePhi{};
     double covarianceTrailerBias{};
-    double covarianceLidarBias{};
 
     double innovation{};
     double innovationCovariance{};
     double mahalanobis{};
     double kalmanGainPhi{};
     double kalmanGainTrailerBias{};
-    double kalmanGainLidarBias{};
 
     MeasurementOutcome outcome{MeasurementOutcome::notInitialized};
     bool measurementAccepted{};
@@ -150,7 +121,7 @@ struct ArticulationEstimate {
     double arrivalGap{};
     int consecutiveRejects{};
     std::size_t historySize{};
-    std::size_t replayedEntries{};
+    std::size_t repropagatedFrames{};
 };
 
 // (K5) trailer yaw rate under pure rolling. Shared by the kinematic process
@@ -161,10 +132,10 @@ struct ArticulationEstimate {
     double truckYawRate,
     double articulation);
 
-// Three-state (K5) process model: x = [phi, b_r2, b_phi].
+// Two-state (K5) process model: x = [phi, b_r2].
 class KinematicArticulationModel {
 public:
-    static constexpr std::size_t kStateSize = 3;
+    static constexpr std::size_t kStateSize = 2;
     using Inputs = ArticulationInputs;
 
     KinematicArticulationModel() = default;
@@ -199,11 +170,11 @@ private:
     ArticulationEstimatorConfig config_{};
 };
 
-// Four-state reduced (K27) process model: x = [v_y1, r2, phi, b_phi], with the
+// Three-state reduced (K27) process model: x = [v_y1, r2, phi], with the
 // measured truck yaw rate and steering angle as inputs.
 class DynamicArticulationModel {
 public:
-    static constexpr std::size_t kStateSize = 4;
+    static constexpr std::size_t kStateSize = 3;
     using Inputs = ArticulationInputs;
 
     DynamicArticulationModel() = default;
@@ -243,7 +214,7 @@ private:
     mutable Vector<kStateSize> inputSteering_{};
 };
 
-// Facade over the out-of-sequence shell. Selects the process model from the
+// Facade over the delayed-measurement shell. Selects the process model from the
 // configuration and publishes a model-independent estimate.
 class ArticulationEstimator {
 public:

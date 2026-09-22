@@ -18,10 +18,9 @@
 
 namespace truck_demo {
 
-// Short label for a filter configuration, used in plot legends and run logs.
-// The compatibility flags are what distinguish a v1 filter from a v2 one.
-[[nodiscard]] const char* estimatorDisplayName(
-    const truck_model::ArticulationEstimatorConfig& config);
+// Short label for a process model, used in plot legends and run logs.
+[[nodiscard]] const char* processModelName(
+    truck_model::ArticulationProcessModel model);
 
 struct VehicleSnapshot {
     double truckX{};
@@ -154,19 +153,9 @@ public:
     [[nodiscard]] static truck_model::ReferencePath defaultPath();
     [[nodiscard]] static truck_model::ReferencePath highCurvaturePath();
 
-    // Reproduces the pre-v2 filter: nearest-frame alignment, diagonal Euler
-    // process noise, an online lidar bias and the old 0.4 s replay window.
-    [[nodiscard]] static truck_model::ArticulationEstimatorConfig
-    legacyFusionConfig();
-    // Settings that put v2 on the controller and v1 in the shadow, so the two
-    // can be read off the same run.
+    // Fusion enabled with the demo's nominal sensor, and the second process
+    // model running alongside for comparison.
     [[nodiscard]] static DemoSettings fusionComparisonSettings();
-    // Both sides run the v2 machinery and differ only in process model, so the
-    // model is compared without the out-of-sequence changes mixed in.
-    [[nodiscard]] static DemoSettings modelComparisonSettings();
-    // The comparison above plus the articulation tracking experiment, so the
-    // filters are judged while the controller is closing the loop on them.
-    [[nodiscard]] static DemoSettings fusionTrackingComparisonSettings();
 
 private:
     [[nodiscard]] VehicleSnapshot vehicleSnapshot() const;

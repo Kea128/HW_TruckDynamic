@@ -410,14 +410,14 @@ void TelemetryPanel::plotArticulationCell(
             darkTheme ? ImVec4(0.35f, 0.78f, 1.0f, 1.0f)
                       : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
             "%s %.2f",
-            estimatorDisplayName(session.settings().articulationEstimator),
+            processModelName(session.settings().articulationEstimator.processModel),
             comparisonValid_ ? primaryRmseDeg_ : 0.0);
         if (shadow) {
             ImGui::SameLine();
             ImGui::TextColored(
                 ImVec4(0.95f, 0.72f, 0.28f, 1.0f),
                 "%s %.2f",
-                estimatorDisplayName(session.settings().shadowEstimator),
+                processModelName(session.settings().shadowProcessModel),
                 comparisonValid_ ? shadowRmseDeg_ : 0.0);
         }
         ImGui::SameLine();
@@ -481,8 +481,8 @@ void TelemetryPanel::plotArticulationCell(
                 if (shadow) {
                     ImPlot::SetNextLineStyle(kShadowColor, 1.7f);
                     ImPlot::PlotLine(
-                        estimatorDisplayName(
-                            session.settings().shadowEstimator),
+                        processModelName(
+                            session.settings().shadowProcessModel),
                         time_.data(),
                         shadowArticulation_.data(),
                         static_cast<int>(shadowArticulation_.size()));
@@ -490,8 +490,9 @@ void TelemetryPanel::plotArticulationCell(
             }
             ImPlot::SetNextLineStyle(kPrimaryColor, 2.0f);
             ImPlot::PlotLine(
-                fusion ? estimatorDisplayName(
-                             session.settings().articulationEstimator)
+                fusion ? processModelName(
+                             session.settings()
+                                 .articulationEstimator.processModel)
                        : u8"实测",
                 time_.data(),
                 articulation_.data(),
@@ -590,8 +591,8 @@ void TelemetryPanel::plotArticulationRateCell(
                 if (shadow) {
                     ImPlot::SetNextLineStyle(kShadowColor, 1.7f);
                     ImPlot::PlotLine(
-                        estimatorDisplayName(
-                            session.settings().shadowEstimator),
+                        processModelName(
+                            session.settings().shadowProcessModel),
                         time_.data(),
                         shadowArticulationRate_.data(),
                         static_cast<int>(shadowArticulationRate_.size()));
@@ -599,8 +600,9 @@ void TelemetryPanel::plotArticulationRateCell(
             }
             ImPlot::SetNextLineStyle(kPrimaryColor, 2.0f);
             ImPlot::PlotLine(
-                fusion ? estimatorDisplayName(
-                             session.settings().articulationEstimator)
+                fusion ? processModelName(
+                             session.settings()
+                                 .articulationEstimator.processModel)
                        : u8"实测",
                 time_.data(),
                 articulationRate_.data(),

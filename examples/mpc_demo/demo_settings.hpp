@@ -23,28 +23,23 @@ struct DemoSettings {
     unsigned lidarRandomSeed{1};
     bool ekfMeasurementFollowsLidar{true};
 
-    // Constant lidar mounting error injected into the simulated scan. The
-    // estimator only removes it through lidarBiasCalibration, so a mismatch
-    // here is the calibration-drift experiment.
-    double lidarInstallationBias{0.0};
-
-    // Truck yaw rate and speed reach the estimator through sensors. Injecting
-    // noise and bias keeps the demo from feeding the filter plant truth.
+    // Truck yaw rate and speed reach the estimator through sensors. Zero by
+    // default so the demo behaves like an ideal rig; raise them to see how the
+    // filter copes with a realistic front end.
     double inputYawRateNoiseStd{0.0};
-    double inputYawRateBias{0.0};
     double inputSpeedNoiseStd{0.0};
     unsigned inputRandomSeed{7};
 
-    // Seeding the filter with the plant articulation is not reproducible on a
-    // vehicle without an encoder; off by default.
-    bool initializeEstimatorFromTruth{false};
+    // Seed the filter with the plant articulation. A vehicle without an encoder
+    // cannot do this, but it keeps the default demo free of a startup transient
+    // that has nothing to do with the filter being compared.
+    bool initializeEstimatorFromTruth{true};
 
-    // Second estimator fed exactly the same events, for comparison. It never
-    // reaches the controller. It carries a full configuration rather than just
-    // a process-model switch so that it can stand in for an entire legacy (v1)
-    // filter, not only a different model.
+    // Second estimator fed exactly the same scans, for comparing the two
+    // process models. It never reaches the controller.
     bool shadowEstimatorEnabled{false};
-    truck_model::ArticulationEstimatorConfig shadowEstimator{};
+    truck_model::ArticulationProcessModel shadowProcessModel{
+        truck_model::ArticulationProcessModel::dynamic};
     double initialLateralError{1.0};
     double initialLateralErrorRate{0.0};
     double initialHeadingError{0.08};
