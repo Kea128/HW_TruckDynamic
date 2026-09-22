@@ -56,6 +56,10 @@ struct DelayedEkfLimits {
     double lostTimeout{0.6};
     double coastingProcessNoiseScale{4.0};
     std::size_t maximumTimelineEntries{4096};
+    // Legacy behaviour: fuse the scan at the closest stored entry instead of
+    // splitting the interval at its stamp. Window rejection still happens
+    // first, so an out-of-window packet is dropped rather than snapped.
+    bool snapToNearestEntry{false};
 
     [[nodiscard]] std::string validationError() const {
         std::string errors;
@@ -236,8 +240,24 @@ public:
             }
         }
 
-        const std::size_t insertion = insertMeasurement(stamp, value, identifier);
+        double effectiveStamp = stamp;
+        if (limits_.snapToNearestEntry) {
+            double best = entries_.front().time;
+            double bestGap = std::abs(best - stamp);
+            for (const Entry& entry : entries_) {
+                const double gap = std::abs(entry.time - stamp);
+                if (gap < bestGap) {
+                    bestGap = gap;
+                    best = entry.time;
+                }
+            }
+            effectiveStamp = best;
+        }
+
+        const std::size_t insertion =
+            insertMeasurement(effectiveStamp, value, identifier);
         replayFrom(insertion - 1, identifier, &report);
+        report.stamp = stamp;
         return report;
     }
 

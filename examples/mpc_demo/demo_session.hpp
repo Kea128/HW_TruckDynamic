@@ -18,6 +18,11 @@
 
 namespace truck_demo {
 
+// Short label for a filter configuration, used in plot legends and run logs.
+// The compatibility flags are what distinguish a v1 filter from a v2 one.
+[[nodiscard]] const char* estimatorDisplayName(
+    const truck_model::ArticulationEstimatorConfig& config);
+
 struct VehicleSnapshot {
     double truckX{};
     double truckY{};
@@ -74,6 +79,10 @@ struct Telemetry {
     std::size_t lidarAcceptedCount{};
     std::size_t lidarGatedCount{};
     std::size_t lidarDroppedCount{};
+    // Same packets as above, scored against the shadow filter. A shorter replay
+    // window shows up here as drops the primary never sees.
+    std::size_t shadowAcceptedCount{};
+    std::size_t shadowDroppedCount{};
     const char* lidarOutcome{"none"};
     bool estimatorCoasting{};
     truck_model::ArticulationEstimate estimator{};
@@ -144,6 +153,14 @@ public:
     [[nodiscard]] static DemoSettings defaultSettings();
     [[nodiscard]] static truck_model::ReferencePath defaultPath();
     [[nodiscard]] static truck_model::ReferencePath highCurvaturePath();
+
+    // Reproduces the pre-v2 filter: nearest-frame alignment, diagonal Euler
+    // process noise, an online lidar bias and the old 0.4 s replay window.
+    [[nodiscard]] static truck_model::ArticulationEstimatorConfig
+    legacyFusionConfig();
+    // Settings that put v2 on the controller and v1 in the shadow, so the two
+    // can be read off the same run.
+    [[nodiscard]] static DemoSettings fusionComparisonSettings();
 
 private:
     [[nodiscard]] VehicleSnapshot vehicleSnapshot() const;
@@ -217,6 +234,9 @@ private:
     std::size_t lastLidarAcceptedCount_{};
     std::size_t lastLidarGatedCount_{};
     std::size_t lastLidarDroppedCount_{};
+    std::size_t lastShadowAcceptedCount_{};
+    std::size_t lastShadowDroppedCount_{};
+    std::size_t totalShadowDropped_{};
     const char* lastLidarOutcome_{"none"};
     double measuredYawRate_{};
     double measuredSpeed_{};

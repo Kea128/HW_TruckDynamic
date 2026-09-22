@@ -65,6 +65,13 @@ private:
     std::vector<double> speed_;
     std::vector<double> curvature_;
     std::vector<double> curvatureRate_;
+    // Running accuracy against the plant, in degrees, over the scored window.
+    // Shown next to the articulation plot so the comparison is a number and not
+    // an eyeball judgement of two overlapping curves.
+    double primaryRmseDeg_{};
+    double shadowRmseDeg_{};
+    double lidarRmseDeg_{};
+    bool comparisonValid_{};
     std::size_t cachedTelemetryRevision_{
         std::numeric_limits<std::size_t>::max()};
     float plotRowHeight_{220.0f};

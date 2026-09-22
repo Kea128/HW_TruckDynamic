@@ -283,6 +283,13 @@ private:
             status_ = u8"仿真已重置";
         }
         ImGui::SameLine();
+        // The fusion comparison is the reason most people open the Studio, so
+        // it gets a toolbar slot instead of living at the bottom of a long
+        // scrolling parameter column.
+        if (ImGui::Button(u8"v1/v2 对比", ImVec2(96.0f, 36.0f))) {
+            loadFusionComparison();
+        }
+        ImGui::SameLine();
         const auto editorState = pathEditor_.state();
         if (editorState != truck_demo::PathEditorState::review) {
             if (ImGui::Button(
@@ -361,6 +368,17 @@ private:
             degrees(session_.steering()),
             degrees(session_.state()[4]),
             degrees(session_.currentArticulationReference().value));
+        ImGui::SameLine();
+        if (session_.settings().lidarFusionEnabled) {
+            ImGui::TextColored(
+                ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
+                u8"| 融合 %s%s",
+                truck_demo::estimatorDisplayName(
+                    session_.settings().articulationEstimator),
+                session_.settings().shadowEstimatorEnabled ? u8" +影子" : "");
+        } else {
+            ImGui::TextDisabled(u8"| 融合关闭");
+        }
         if (!session_.warningReason().empty()) {
             ImGui::SameLine();
             ImGui::TextColored(
@@ -406,7 +424,29 @@ private:
             darkTheme_ ? ImVec4(0.25f, 0.72f, 1.0f, 1.0f)
                        : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
             u8"模型与控制参数");
-        ImGui::TextDisabled(u8"修改后点击底部“应用并重建模型”");
+
+        // Editing a widget only changes the draft. Without a visible reminder
+        // it is easy to tick a box, see nothing happen, and conclude the
+        // feature is broken.
+        if (draftDirty_) {
+            ImGui::PushStyleColor(
+                ImGuiCol_ChildBg,
+                darkTheme_ ? ImVec4(0.30f, 0.23f, 0.06f, 1.0f)
+                           : ImVec4(1.0f, 0.95f, 0.80f, 1.0f));
+            ImGui::BeginChild("##DraftDirty", ImVec2(0.0f, 46.0f), true);
+            ImGui::TextColored(
+                darkTheme_ ? ImVec4(1.0f, 0.82f, 0.35f, 1.0f)
+                           : ImVec4(0.70f, 0.42f, 0.02f, 1.0f),
+                u8"参数尚未生效");
+            if (accentButton(
+                    u8"立即应用并重建模型", ImVec2(-1.0f, 0.0f), true)) {
+                applyDraft();
+            }
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::TextDisabled(u8"修改后点击“应用并重建模型”");
+        }
         ImGui::Separator();
 
         const bool running =
@@ -537,7 +577,10 @@ private:
                 u8"铰接角参考", ImGuiTreeNodeFlags_DefaultOpen)) {
             renderArticulationReferenceSettings();
         }
-        if (ImGui::CollapsingHeader(u8"铰接角雷达融合")) {
+        if (ImGui::CollapsingHeader(
+                u8"铰接角雷达融合",
+                draft_.lidarFusionEnabled ? ImGuiTreeNodeFlags_DefaultOpen
+                                          : 0)) {
             parameterTableBegin("lidar_fusion");
             booleanProperty(
                 u8"启用 Delayed EKF",
@@ -616,10 +659,14 @@ private:
                 u8"启用影子估计器",
                 draft_.shadowEstimatorEnabled);
             processModelProperty(
-                u8"影子过程模型", draft_.shadowProcessModel);
+                u8"影子过程模型", draft_.shadowEstimator.processModel);
+            booleanProperty(
+                u8"影子用 v1 行为",
+                shadowUsesLegacy_);
             ImGui::EndTable();
             ImGui::TextDisabled(
-                u8"影子估计器吃同样的事件但不进控制回路，仅用于对比。");
+                u8"影子估计器吃同样的事件但不进控制回路，仅用于对比。\n"
+                u8"勾选「影子用 v1 行为」即最近邻对齐 + 对角欧拉噪声 + 在线偏置 + 0.4s 窗。");
         }
 
         ImGui::Spacing();
@@ -636,6 +683,12 @@ private:
             syncDraft();
             fitRequested_ = true;
             status_ = u8"已恢复默认车辆、控制器和 S 形路径";
+        }
+        if (accentButton(
+                u8"Delayed EKF：v1 与 v2 同场对比",
+                ImVec2(-1.0f, 34.0f),
+                true)) {
+            loadFusionComparison();
         }
         if (ImGui::Button(
                 u8"加载高曲率连续 S 弯（8 m/s）",
@@ -724,7 +777,9 @@ private:
         ImGui::SetNextItemWidth(-1.0f);
         std::string id = "##";
         id += label;
-        ImGui::InputDouble(id.c_str(), &value, step, step * 10.0, format);
+        if (ImGui::InputDouble(id.c_str(), &value, step, step * 10.0, format)) {
+            draftDirty_ = true;
+        }
     }
 
     void integerProperty(const char* label, int& value, int step) {
@@ -736,7 +791,9 @@ private:
         ImGui::SetNextItemWidth(-1.0f);
         std::string id = "##";
         id += label;
-        ImGui::InputInt(id.c_str(), &value, step, step * 10);
+        if (ImGui::InputInt(id.c_str(), &value, step, step * 10)) {
+            draftDirty_ = true;
+        }
     }
 
     void processModelProperty(
@@ -757,6 +814,7 @@ private:
             value = selected == 1
                         ? truck_model::ArticulationProcessModel::dynamic
                         : truck_model::ArticulationProcessModel::kinematic;
+            draftDirty_ = true;
         }
     }
 
@@ -768,7 +826,9 @@ private:
         ImGui::TableSetColumnIndex(1);
         std::string id = "##";
         id += label;
-        ImGui::Checkbox(id.c_str(), &value);
+        if (ImGui::Checkbox(id.c_str(), &value)) {
+            draftDirty_ = true;
+        }
     }
 
     void syncDraft() {
@@ -795,6 +855,10 @@ private:
             draft_.articulationEstimator.noiseDensity.trailerYawBias);
         ekfLidarBiasStdDegrees_ = varianceToStdDegrees(
             draft_.articulationEstimator.noiseDensity.lidarBias);
+        shadowUsesLegacy_ =
+            draft_.shadowEstimator.compatibility.nearestFrameAlignment ||
+            draft_.shadowEstimator.compatibility.diagonalEulerProcessNoise;
+        draftDirty_ = false;
         error_.clear();
     }
 
@@ -820,6 +884,14 @@ private:
             stdDegreesToVariance(ekfTrailerBiasStdDegrees_);
         draft_.articulationEstimator.noiseDensity.lidarBias =
             stdDegreesToVariance(ekfLidarBiasStdDegrees_);
+
+        // The shadow keeps its own process model but otherwise tracks either
+        // the legacy behaviour or the primary's tuning.
+        const auto shadowModel = draft_.shadowEstimator.processModel;
+        draft_.shadowEstimator = shadowUsesLegacy_
+                                     ? truck_demo::DemoSession::legacyFusionConfig()
+                                     : draft_.articulationEstimator;
+        draft_.shadowEstimator.processModel = shadowModel;
     }
 
     void applyDraft() {
@@ -830,6 +902,28 @@ private:
             simulationAccumulator_ = 0.0;
             autoExportedThisRun_ = false;
             status_ = u8"参数已应用，物理 Plant 与 MPC 已重新构建";
+        } catch (const std::exception& exception) {
+            error_ = exception.what();
+        }
+    }
+
+    // One click to the configuration the fusion comparison needs: fusion on,
+    // engineering lidar noise and latency, v2 driving the controller and v1
+    // running alongside it in the shadow.
+    void loadFusionComparison() {
+        try {
+            auto settings = truck_demo::DemoSession::fusionComparisonSettings();
+            settings.vehicle = session_.settings().vehicle;
+            settings.mpc = session_.settings().mpc;
+            session_.configure(settings);
+            session_.setPath(truck_demo::DemoSession::defaultPath());
+            syncDraft();
+            fitRequested_ = true;
+            simulationAccumulator_ = 0.0;
+            autoExportedThisRun_ = false;
+            status_ =
+                u8"已加载 v1/v2 对比：雷达 4°、时延 0.1-0.4 s，"
+                u8"蓝线 v2 进控制回路，橙线 v1 仅旁路。点运行。";
         } catch (const std::exception& exception) {
             error_ = exception.what();
         }
@@ -1687,6 +1781,8 @@ private:
     double ekfPhiProcessStdDegrees_{3.0};
     double ekfTrailerBiasStdDegrees_{0.81};
     double ekfLidarBiasStdDegrees_{0.0018};
+    bool shadowUsesLegacy_{true};
+    bool draftDirty_{};
     bool drawingReference_{};
     std::vector<truck_demo::TimeArticulationPoint> drawnRawPoints_;
     std::vector<double> previewTimes_;

@@ -60,6 +60,18 @@ double speedLimitForReference(
 
 }  // namespace
 
+const char* estimatorDisplayName(
+    const truck_model::ArticulationEstimatorConfig& config) {
+    const bool legacy = config.compatibility.nearestFrameAlignment ||
+                        config.compatibility.diagonalEulerProcessNoise;
+    if (legacy) {
+        return "v1";
+    }
+    return config.processModel == truck_model::ArticulationProcessModel::dynamic
+               ? "v2 K27r"
+               : "v2 K5";
+}
+
 std::string DemoSettings::validationError() const {
     std::ostringstream errors;
     const auto vehicleError = vehicle.validationError();
@@ -161,6 +173,14 @@ std::string DemoSettings::validationError() const {
         errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
                   "scans stay inside the replay window; ";
     }
+    if (shadowEstimatorEnabled) {
+        const auto shadowError = shadowEstimator.validationError();
+        if (!shadowError.empty()) {
+            errors << "shadow " << shadowError;
+        }
+        // The shadow may deliberately run a short window: reproducing the v1
+        // packet loss is the point of the comparison, so this is not an error.
+    }
     if (mpc.horizon > 200) {
         errors << "horizon must be <= 200; ";
     }
@@ -190,6 +210,7 @@ void DemoSettings::applyEstimatorMeasurementFromLidar() {
     constexpr double kMinimumLidarStd = 0.25 * kPi / 180.0;
     const double lidarStd = std::max(lidarNoiseStd, kMinimumLidarStd);
     articulationEstimator.measurementVariance = lidarStd * lidarStd;
+    shadowEstimator.measurementVariance = lidarStd * lidarStd;
 }
 
 DemoSession::DemoSession() {
@@ -577,6 +598,38 @@ DemoSettings DemoSession::defaultSettings() {
     return settings;
 }
 
+truck_model::ArticulationEstimatorConfig DemoSession::legacyFusionConfig() {
+    truck_model::ArticulationEstimatorConfig config;
+    config.processModel = truck_model::ArticulationProcessModel::kinematic;
+    config.compatibility.nearestFrameAlignment = true;
+    config.compatibility.diagonalEulerProcessNoise = true;
+    config.estimateLidarBias = true;
+    // v1 shipped a 0.4 s window, which has no margin at the specified 400 ms
+    // worst-case latency. Keeping it is what makes the comparison meaningful.
+    config.historyHorizon = 0.4;
+    config.lostTimeout = 0.4;
+    return config;
+}
+
+DemoSettings DemoSession::fusionComparisonSettings() {
+    auto settings = defaultSettings();
+    settings.lidarFusionEnabled = true;
+    settings.lidarPeriod = 0.1;
+    settings.lidarDelayMin = 0.1;
+    settings.lidarDelayMax = 0.4;
+    // 4 degrees, the perception figure the handover document quotes.
+    settings.lidarNoiseStd = 0.0698131700798;
+    settings.ekfMeasurementFollowsLidar = true;
+    settings.initializeEstimatorFromTruth = false;
+    settings.inputYawRateNoiseStd = 0.005;
+    settings.inputSpeedNoiseStd = 0.2;
+    settings.adaptiveSpeedEnabled = false;
+    settings.shadowEstimatorEnabled = true;
+    settings.shadowEstimator = legacyFusionConfig();
+    settings.applyEstimatorMeasurementFromLidar();
+    return settings;
+}
+
 truck_model::ReferencePath DemoSession::defaultPath() {
     return defaultScenarioPath();
 }
@@ -883,6 +936,8 @@ void DemoSession::record() {
     sample.lidarAcceptedCount = lastLidarAcceptedCount_;
     sample.lidarGatedCount = lastLidarGatedCount_;
     sample.lidarDroppedCount = lastLidarDroppedCount_;
+    sample.shadowAcceptedCount = lastShadowAcceptedCount_;
+    sample.shadowDroppedCount = lastShadowDroppedCount_;
     sample.lidarOutcome = lastLidarOutcome_;
     sample.estimatorCoasting = articulationEstimate_.coasting;
     sample.estimator = articulationEstimate_;
@@ -941,6 +996,9 @@ void DemoSession::resetArticulationEstimator() {
     lastLidarAcceptedCount_ = 0;
     lastLidarGatedCount_ = 0;
     lastLidarDroppedCount_ = 0;
+    lastShadowAcceptedCount_ = 0;
+    lastShadowDroppedCount_ = 0;
+    totalShadowDropped_ = 0;
     lastLidarOutcome_ = "none";
     nextLidarId_ = 1;
     unconstrainedSteering_ = steering_;
@@ -956,8 +1014,7 @@ void DemoSession::resetArticulationEstimator() {
     articulationEstimator_.reset(time_, seedArticulation);
     articulationEstimate_ = articulationEstimator_.estimate();
 
-    auto shadowConfig = estimatorConfig;
-    shadowConfig.processModel = settings_.shadowProcessModel;
+    auto shadowConfig = settings_.shadowEstimator;
     shadowEstimator_.configure(settings_.vehicle, shadowConfig);
     shadowEstimator_.reset(time_, seedArticulation);
     shadowEstimate_ = shadowEstimator_.estimate();
@@ -1017,6 +1074,8 @@ void DemoSession::deliverDueLidar() {
     lastLidarAcceptedCount_ = 0;
     lastLidarGatedCount_ = 0;
     lastLidarDroppedCount_ = 0;
+    lastShadowAcceptedCount_ = 0;
+    lastShadowDroppedCount_ = 0;
     lastLidarOutcome_ = "none";
 
     // Service packets in arrival order rather than scan order. With a variable
@@ -1050,6 +1109,12 @@ void DemoSession::deliverDueLidar() {
             articulationEstimator_.updateLidar(pending.measurement);
         if (settings_.shadowEstimatorEnabled) {
             shadowEstimate_ = shadowEstimator_.updateLidar(pending.measurement);
+            if (shadowEstimate_.measurementAccepted) {
+                ++lastShadowAcceptedCount_;
+            } else if (!shadowEstimate_.measurementGated) {
+                ++lastShadowDroppedCount_;
+                ++totalShadowDropped_;
+            }
         }
 
         lastLidarAccepted_ = articulationEstimate_.measurementAccepted;

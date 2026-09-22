@@ -616,7 +616,8 @@ void testShadowEstimatorRunsInParallel() {
     settings.shadowEstimatorEnabled = true;
     settings.articulationEstimator.processModel =
         truck_model::ArticulationProcessModel::kinematic;
-    settings.shadowProcessModel =
+    settings.shadowEstimator = settings.articulationEstimator;
+    settings.shadowEstimator.processModel =
         truck_model::ArticulationProcessModel::dynamic;
     session.configure(settings);
     session.start();
@@ -708,6 +709,96 @@ void testLidarInstallationBiasNeedsCalibration() {
     require(
         calibrated < 0.5 * uncalibrated,
         "calibrating the lidar mounting bias must remove most of the error");
+}
+
+// The v1/v2 preset must produce a runnable comparison out of the box: fusion
+// on, v2 on the controller, a legacy filter in the shadow.
+void testFusionComparisonPresetIsReady() {
+    auto settings = truck_demo::DemoSession::fusionComparisonSettings();
+    require(settings.lidarFusionEnabled, "preset must enable fusion");
+    require(
+        settings.shadowEstimatorEnabled, "preset must enable the shadow");
+    require(
+        std::string(truck_demo::estimatorDisplayName(
+            settings.articulationEstimator)) != "v1",
+        "the controller must run the v2 filter");
+    require(
+        std::string(truck_demo::estimatorDisplayName(
+            settings.shadowEstimator)) == "v1",
+        "the shadow must run the v1 filter");
+    require(
+        !settings.initializeEstimatorFromTruth,
+        "preset must cold-start so the comparison is honest");
+
+    truck_demo::DemoSession session;
+    session.configure(settings);
+    session.start();
+    for (std::size_t step = 0; step < 400; ++step) {
+        session.step();
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+    const auto& history = session.history();
+    require(history.size() > 100, "preset run produced too little telemetry");
+
+    std::size_t delivered = 0;
+    bool primaryDiffersFromLidar = false;
+    bool shadowDiffersFromPrimary = false;
+    for (const auto& sample : history) {
+        delivered += sample.lidarDeliveredCount;
+        if (std::abs(sample.estimatedArticulation - sample.lidarArticulation) >
+            0.01) {
+            primaryDiffersFromLidar = true;
+        }
+        if (std::abs(sample.estimatedArticulation - sample.shadowArticulation) >
+            1.0e-6) {
+            shadowDiffersFromPrimary = true;
+        }
+    }
+    require(delivered > 50, "preset must deliver lidar packets");
+    require(
+        primaryDiffersFromLidar,
+        "the fused estimate must be distinguishable from the raw scan");
+    require(
+        shadowDiffersFromPrimary,
+        "v1 and v2 must produce visibly different traces");
+}
+
+// A replay window shorter than the latency must show up as dropped packets, not
+// as a silently clamped stamp. Getting this wrong flatters the legacy filter.
+void testLegacyShadowDropsOutOfWindowScans() {
+    auto settings = truck_demo::DemoSession::fusionComparisonSettings();
+    settings.lidarDelayMin = 0.35;
+    settings.lidarDelayMax = 0.5;
+    settings.articulationEstimator.historyHorizon = 0.7;
+    // The shadow keeps the legacy 0.4 s window, so most scans arrive too late.
+    truck_demo::DemoSession session;
+    session.configure(settings);
+    session.start();
+
+    std::size_t delivered = 0;
+    std::size_t primaryDropped = 0;
+    std::size_t shadowDropped = 0;
+    for (std::size_t step = 0; step < 400; ++step) {
+        session.step();
+        const auto& sample = session.history().back();
+        delivered += sample.lidarDeliveredCount;
+        primaryDropped += sample.lidarDroppedCount;
+        shadowDropped += sample.shadowDroppedCount;
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+    require(delivered > 50, "not enough packets to judge the window");
+    require(
+        primaryDropped == 0,
+        "the v2 window covers the latency, so it must not drop packets");
+    require(
+        shadowDropped > delivered / 4,
+        "the legacy 0.4 s window must drop the scans that arrive past it");
 }
 
 void testSessionLogExportContainsFusionColumns() {
@@ -818,6 +909,8 @@ int main() {
         testOutOfOrderDeliveryStillTracks();
         testColdStartWithNoisySensors();
         testShadowEstimatorRunsInParallel();
+        testFusionComparisonPresetIsReady();
+        testLegacyShadowDropsOutOfWindowScans();
         testHistoryHorizonMustCoverLatency();
         testLidarInstallationBiasNeedsCalibration();
         testSessionLogExportContainsFusionColumns();

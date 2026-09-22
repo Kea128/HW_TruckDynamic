@@ -403,6 +403,8 @@ struct ArticulationEstimator::Impl {
         value.mahalanobisGate = config.mahalanobisGate;
         value.consecutiveRejectLimit = config.consecutiveRejectLimit;
         value.lostTimeout = config.lostTimeout;
+        value.snapToNearestEntry =
+            config.compatibility.nearestFrameAlignment;
         return value;
     }
 
@@ -622,18 +624,10 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
         throw std::invalid_argument("lidar measurement must be finite");
     }
 
-    double stamp = measurement.stamp;
-    if (impl_->config.compatibility.nearestFrameAlignment) {
-        stamp = impl_->useDynamic() ? impl_->dynamic.time()
-                                    : impl_->kinematic.time();
-        // The legacy path could only align to a stored frame; approximate it by
-        // snapping onto the newest one when the scan is not older than it.
-        if (measurement.stamp < stamp) {
-            const double horizon = impl_->config.historyHorizon;
-            const double oldest = stamp - horizon;
-            stamp = std::max(measurement.stamp, oldest);
-        }
-    }
+    // Nearest-frame alignment is applied inside the shell, which owns the
+    // timeline. Doing it here would have to clamp an out-of-window stamp rather
+    // than drop it, which would hide the legacy filter's packet loss.
+    const double stamp = measurement.stamp;
 
     const std::uint64_t identifier =
         measurement.id != 0 ? measurement.id : impl_->nextIdentifier++;

@@ -307,6 +307,44 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
         curvature_[i] = history[i].referenceCurvature;
         curvatureRate_[i] = history[i].referenceCurvatureRate;
     }
+
+    primaryRmseDeg_ = 0.0;
+    shadowRmseDeg_ = 0.0;
+    lidarRmseDeg_ = 0.0;
+    comparisonValid_ = false;
+    if (!session.settings().lidarFusionEnabled) {
+        return;
+    }
+    // Skip the first second so the initial transient does not dominate.
+    double primarySse = 0.0;
+    double shadowSse = 0.0;
+    double lidarSse = 0.0;
+    std::size_t scored = 0;
+    for (const auto& sample : history) {
+        if (sample.time < 1.0) {
+            continue;
+        }
+        const double primary =
+            sample.estimatedArticulation - sample.plantArticulation;
+        const double shadow =
+            sample.shadowArticulation - sample.plantArticulation;
+        const double lidar =
+            sample.lidarArticulation - sample.plantArticulation;
+        primarySse += primary * primary;
+        shadowSse += shadow * shadow;
+        lidarSse += lidar * lidar;
+        ++scored;
+    }
+    if (scored == 0) {
+        return;
+    }
+    const auto rmse = [scored](double sse) {
+        return degrees(std::sqrt(sse / static_cast<double>(scored)));
+    };
+    primaryRmseDeg_ = rmse(primarySse);
+    shadowRmseDeg_ = rmse(shadowSse);
+    lidarRmseDeg_ = rmse(lidarSse);
+    comparisonValid_ = true;
 }
 
 void TelemetryPanel::plotArticulationCell(
@@ -315,6 +353,9 @@ void TelemetryPanel::plotArticulationCell(
     const double error = articulationTrackingError_.empty()
                              ? 0.0
                              : articulationTrackingError_.back();
+    const bool fusion = session.settings().lidarFusionEnabled;
+    const bool shadow = session.settings().shadowEstimatorEnabled;
+
     beginPlotCell();
     ImGui::TextUnformatted(u8"铰接角");
     ImGui::SameLine();
@@ -325,27 +366,53 @@ void TelemetryPanel::plotArticulationCell(
                   : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
         "%.2f",
         articulation_.empty() ? 0.0 : articulation_.back());
-    ImGui::SameLine();
-    ImGui::TextDisabled(u8"ref");
-    ImGui::SameLine();
-    ImGui::TextColored(
-        ImVec4(1.0f, 0.56f, 0.20f, 1.0f),
-        "%.2f",
-        articulationReference_.empty() ? 0.0 : articulationReference_.back());
-    ImGui::SameLine();
-    ImGui::TextDisabled(u8"err");
-    ImGui::SameLine();
-    ImGui::TextColored(
-        darkTheme ? ImVec4(0.95f, 0.72f, 0.28f, 1.0f)
-                  : ImVec4(0.72f, 0.42f, 0.04f, 1.0f),
-        "%.2f",
-        error);
+    if (fusion) {
+        // Against the plant, so the fused estimate can be judged by a number
+        // rather than by two overlapping curves.
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"· RMSE");
+        ImGui::SameLine();
+        ImGui::TextColored(
+            darkTheme ? ImVec4(0.35f, 0.78f, 1.0f, 1.0f)
+                      : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
+            "%s %.2f",
+            estimatorDisplayName(session.settings().articulationEstimator),
+            comparisonValid_ ? primaryRmseDeg_ : 0.0);
+        if (shadow) {
+            ImGui::SameLine();
+            ImGui::TextColored(
+                ImVec4(0.95f, 0.72f, 0.28f, 1.0f),
+                "%s %.2f",
+                estimatorDisplayName(session.settings().shadowEstimator),
+                comparisonValid_ ? shadowRmseDeg_ : 0.0);
+        }
+        ImGui::SameLine();
+        ImGui::TextColored(
+            ImVec4(0.78f, 0.55f, 1.0f, 1.0f),
+            u8"雷达 %.2f",
+            comparisonValid_ ? lidarRmseDeg_ : 0.0);
+        ImGui::SameLine();
+        ImGui::TextDisabled("deg");
+    } else {
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"ref");
+        ImGui::SameLine();
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.56f, 0.20f, 1.0f),
+            "%.2f",
+            articulationReference_.empty() ? 0.0
+                                           : articulationReference_.back());
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"err");
+        ImGui::SameLine();
+        ImGui::TextColored(
+            darkTheme ? ImVec4(0.95f, 0.72f, 0.28f, 1.0f)
+                      : ImVec4(0.72f, 0.42f, 0.04f, 1.0f),
+            "%.2f",
+            error);
+    }
     const float height = plotHeight();
-    if (ImPlot::BeginPlot(
-            "##articulation_plot",
-            ImVec2(-1.0f, height),
-            session.settings().lidarFusionEnabled ? 0
-                                                  : ImPlotFlags_NoLegend)) {
+    if (ImPlot::BeginPlot("##articulation_plot", ImVec2(-1.0f, height))) {
         ImPlot::SetupAxes(
             u8"时间 [s]",
             u8"phi [deg]",
@@ -354,48 +421,60 @@ void TelemetryPanel::plotArticulationCell(
         const double right = std::max(15.0, session.time());
         ImPlot::SetupAxisLimits(
             ImAxis_X1, right - 15.0, right, ImGuiCond_Always);
+        // Fit the vertical range to the data. A fixed +/-25 deg window makes a
+        // few-degree articulation look like a single flat line, which is what
+        // hides the difference between the raw scan and the fused estimates.
         ImPlot::SetupAxisLimits(ImAxis_Y1, -25.0, 25.0, ImGuiCond_Once);
+        if (fusion) {
+            ImPlot::SetupAxes(nullptr, nullptr, 0, ImPlotAxisFlags_AutoFit);
+        }
         if (!articulation_.empty()) {
-            ImPlot::SetNextLineStyle(
-                ImVec4(0.22f, 0.68f, 1.0f, 1.0f), 2.0f);
-            ImPlot::PlotLine(
-                session.settings().lidarFusionEnabled ? u8"估计"
-                                                      : u8"实测",
-                time_.data(),
-                articulation_.data(),
-                static_cast<int>(articulation_.size()));
-            if (session.settings().lidarFusionEnabled) {
+            if (fusion) {
+                // Draw the reference the estimates are judged against first so
+                // the thinner estimate traces stay readable on top of it.
                 ImPlot::SetNextLineStyle(
-                    ImVec4(0.45f, 0.82f, 0.48f, 1.0f), 1.6f);
+                    ImVec4(0.45f, 0.82f, 0.48f, 1.0f), 2.2f);
                 ImPlot::PlotLine(
-                    u8"Plant",
+                    u8"Plant 真值",
                     time_.data(),
                     plantArticulation_.data(),
                     static_cast<int>(plantArticulation_.size()));
                 ImPlot::SetNextLineStyle(
-                    ImVec4(0.78f, 0.55f, 1.0f, 1.0f), 1.4f);
+                    ImVec4(0.78f, 0.55f, 1.0f, 1.0f), 1.3f);
                 ImPlot::PlotLine(
-                    u8"雷达",
+                    u8"雷达原始",
                     time_.data(),
                     lidarArticulation_.data(),
                     static_cast<int>(lidarArticulation_.size()));
-                if (session.settings().shadowEstimatorEnabled) {
+                if (shadow) {
                     ImPlot::SetNextLineStyle(
-                        ImVec4(0.95f, 0.72f, 0.28f, 1.0f), 1.4f);
+                        ImVec4(0.95f, 0.72f, 0.28f, 1.0f), 1.6f);
                     ImPlot::PlotLine(
-                        u8"影子",
+                        estimatorDisplayName(
+                            session.settings().shadowEstimator),
                         time_.data(),
                         shadowArticulation_.data(),
                         static_cast<int>(shadowArticulation_.size()));
                 }
             }
             ImPlot::SetNextLineStyle(
-                ImVec4(1.0f, 0.56f, 0.20f, 1.0f), 2.0f);
+                ImVec4(0.22f, 0.68f, 1.0f, 1.0f), 2.0f);
             ImPlot::PlotLine(
-                u8"参考",
+                fusion ? estimatorDisplayName(
+                             session.settings().articulationEstimator)
+                       : u8"实测",
                 time_.data(),
-                articulationReference_.data(),
-                static_cast<int>(articulationReference_.size()));
+                articulation_.data(),
+                static_cast<int>(articulation_.size()));
+            if (!session.articulationReference().empty()) {
+                ImPlot::SetNextLineStyle(
+                    ImVec4(1.0f, 0.56f, 0.20f, 1.0f), 2.0f);
+                ImPlot::PlotLine(
+                    u8"参考",
+                    time_.data(),
+                    articulationReference_.data(),
+                    static_cast<int>(articulationReference_.size()));
+            }
             const double currentTime = time_.back();
             const double currentValue = articulation_.back();
             ImPlot::SetNextMarkerStyle(

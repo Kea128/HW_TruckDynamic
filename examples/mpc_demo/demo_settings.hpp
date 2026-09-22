@@ -39,11 +39,12 @@ struct DemoSettings {
     // vehicle without an encoder; off by default.
     bool initializeEstimatorFromTruth{false};
 
-    // Second estimator fed the same events for comparison. It never reaches the
-    // controller.
+    // Second estimator fed exactly the same events, for comparison. It never
+    // reaches the controller. It carries a full configuration rather than just
+    // a process-model switch so that it can stand in for an entire legacy (v1)
+    // filter, not only a different model.
     bool shadowEstimatorEnabled{false};
-    truck_model::ArticulationProcessModel shadowProcessModel{
-        truck_model::ArticulationProcessModel::dynamic};
+    truck_model::ArticulationEstimatorConfig shadowEstimator{};
     double initialLateralError{1.0};
     double initialLateralErrorRate{0.0};
     double initialHeadingError{0.08};

@@ -153,8 +153,27 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "shadowEstimatorEnabled", settings.shadowEstimatorEnabled);
     writeKey(
         out,
-        "shadowProcessModel",
-        std::string(processModelName(settings.shadowProcessModel)));
+        "shadow.label",
+        std::string(estimatorDisplayName(settings.shadowEstimator)));
+    writeKey(
+        out,
+        "shadow.processModel",
+        std::string(processModelName(settings.shadowEstimator.processModel)));
+    writeKey(
+        out, "shadow.historyHorizon", settings.shadowEstimator.historyHorizon);
+    writeKey(
+        out,
+        "shadow.estimateLidarBias",
+        settings.shadowEstimator.estimateLidarBias);
+    writeKey(
+        out,
+        "shadow.compatibility.nearestFrameAlignment",
+        settings.shadowEstimator.compatibility.nearestFrameAlignment);
+    writeKey(
+        out,
+        "shadow.compatibility.diagonalEulerProcessNoise",
+        settings.shadowEstimator.compatibility.diagonalEulerProcessNoise);
+    writeKey(out, "ekf.label", std::string(estimatorDisplayName(ekf)));
     writeKey(
         out,
         "ekf.processModel",
