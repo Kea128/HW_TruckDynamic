@@ -113,6 +113,53 @@ Amplitudes track(bool fusion,
     return a;
 }
 
+// How much does the trailer-bias random-walk density matter to the kinematic
+// model? Sweep it and watch both channels, since raising it trades phi noise
+// for phi-dot responsiveness.
+void sweepTrailerBiasDensity() {
+    const double values[] = {2.0e-5, 1.0e-4, 2.0e-4, 1.0e-3,
+                             5.0e-3, 1.1e-2, 5.0e-2};
+    std::printf("\nq_b [rad^2/s^3]   phi[deg]   phidot[deg/s]\n");
+    for (const double q : values) {
+        auto settings = truck_demo::DemoSession::fusionComparisonSettings();
+        settings.articulationEstimator.processModel =
+            truck_model::ArticulationProcessModel::kinematic;
+        settings.articulationEstimator.noiseDensity.trailerYawBias = q;
+        settings.shadowEstimatorEnabled = false;
+        settings.mpcUsesFusedArticulation = false;
+        settings.applyEstimatorMeasurementFromLidar();
+
+        truck_demo::DemoSession session;
+        session.configure(settings);
+        session.start();
+        for (std::size_t step = 0; step < 1200; ++step) {
+            session.step();
+            if (session.simulationState() !=
+                truck_demo::SimulationState::running) {
+                break;
+            }
+        }
+        double phiSse = 0.0;
+        double rateSse = 0.0;
+        std::size_t scored = 0;
+        for (const auto& s : session.history()) {
+            if (s.time < 1.0) {
+                continue;
+            }
+            const double ePhi = s.estimatedArticulation - s.plantArticulation;
+            const double eRate =
+                s.estimatedArticulationRate - s.plantArticulationRate;
+            phiSse += ePhi * ePhi;
+            rateSse += eRate * eRate;
+            ++scored;
+        }
+        const double n = static_cast<double>(scored);
+        std::printf("%14.2e   %8.3f   %13.3f\n", q,
+                    std::sqrt(phiSse / n) * kDeg,
+                    std::sqrt(rateSse / n) * kDeg);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -139,5 +186,6 @@ int main() {
                 kinClosed.plantOverReference, kinClosed.estimateOverPlant);
     std::printf("b on,  K27r in the loop %9.3f   %9.3f\n",
                 dynClosed.plantOverReference, dynClosed.estimateOverPlant);
+    sweepTrailerBiasDensity();
     return 0;
 }
