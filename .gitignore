@@ -7,8 +7,7 @@ cmake-build-*/
 # Simulation exports. Regenerate with the Studio; see README.
 runs/
 
-# Release staging: binaries and archives do not belong in the source history.
-release/
+# Binaries and intermediates stay out of the source history.
 *.exe
 *.dll
 *.lib
@@ -18,6 +17,14 @@ release/
 *.pdb
 *.ilk
 *.zip
+
+# Exception: the published release package under release/ is tracked on
+# purpose. Note that release/ itself must not be listed above, because git
+# cannot re-include a file whose parent directory is excluded.
+# The runs/ rule above still applies inside it, so a Studio launched from the
+# release folder cannot drag its simulation exports into a commit.
+!release/**/*.exe
+!release/**/*.zip
 
 # Editor and OS
 .vs/

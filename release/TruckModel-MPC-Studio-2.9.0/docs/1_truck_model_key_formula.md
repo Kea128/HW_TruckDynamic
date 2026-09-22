@@ -1,0 +1,866 @@
+# 卡车—半挂车模型：关键公式与完整矩阵
+
+本文给出卡车—半挂车单轨模型的统一符号、关键假设、关键公式和完整矩阵。重点修正
+铰接点速度约束：卡车与拖车的横向速度分别定义在各自车体坐标系中，线性约束必须
+保留纵向速度投影 \(U\phi\)。
+
+更详细的逐式推导见
+[`2_truck_model_derivation.md`](2_truck_model_derivation.md)。
+实车 10 Hz 时延雷达铰接角融合见
+[`3_articulation_fusion_filter.md`](3_articulation_fusion_filter.md)。
+
+可视化验证报告见
+[最新推导验证 Canvas](https://cursor.com/dashboard/shared-canvases?shareId=canvas--dwF_B4CCAInb-mDcQVwzHpy)。
+
+---
+
+## 1. 坐标、符号和假设
+
+### 1.1 二维坐标与正方向
+
+- 全局坐标为 \(X,Y\)；
+- 每个车体的纵向为前方，横向为左方；
+- 航向角逆时针为正；
+- 卡车航向为 \(\theta_1\)，拖车航向为 \(\theta_2\)；
+- 铰接角
+  \[
+  \boxed{\phi=\theta_1-\theta_2};
+  \]
+- 偏航角速度
+  \[
+  \boxed{r_1=\dot\theta_1,\qquad r_2=\dot\theta_2}.
+  \]
+
+全文只建立二维平面模型。\(I_1,I_2\) 分别表示两车的平面偏航转动惯量。
+
+### 1.2 参数
+
+| 符号 | 含义 | SI 单位 |
+|---|---|---|
+| \(m_1,m_2\) | 卡车、拖车质量 | \(\mathrm{kg}\) |
+| \(I_1,I_2\) | 卡车、拖车平面偏航转动惯量 | \(\mathrm{kg\,m^2}\) |
+| \(a_1,b_1\) | 卡车质心到前轴、后轴距离 | \(\mathrm m\) |
+| \(d_1\) | 卡车质心到铰接点的向后距离 | \(\mathrm m\) |
+| \(a_2,b_2\) | 拖车质心到铰接点、拖车轴距离 | \(\mathrm m\) |
+| \(C_{1f},C_{1r},C_{2r}\) | 三个整轴侧偏刚度 | \(\mathrm{N/rad}\) |
+| \(U_1,U_2\) | 卡车、拖车沿各自车体前向的实际纵向速度分量；纯滚动运动学以 \(U_1\) 为输入 | \(\mathrm{m/s}\) |
+| \(U\) | 线性动力学中两车直线平衡点的共同恒定名义纵速 | \(\mathrm{m/s}\) |
+| \(\delta\) | 卡车前轮转角 | \(\mathrm{rad}\) |
+| \(H\) | 拖车作用于卡车的铰接横向力 | \(\mathrm N\) |
+
+定义：
+
+\[
+\boxed{
+L_1=a_1+b_1,\qquad
+L_2=a_2+b_2.
+}
+\tag{K1}
+\]
+
+![卡车—半挂车单轨模型几何与坐标](images/articulated_geometry.svg)
+
+图中 \(F_1,O_1,R_1\) 是卡车前轴、质心和后轴，\(P_h\) 是铰接点，
+\(O_2,R_2\) 是拖车质心和拖车轴。车体 \(x\) 向前、\(y\) 向左；
+\(\phi=\theta_1-\theta_2\)。图示取 \(d_1<b_1\)，故 \(P_h\) 在 \(R_1\) 前方；
+当 \(d_1=b_1\) 时二者重合。
+
+### 1.3 模型层次
+
+用 \(\varepsilon\) 统一表示小量阶次，并以 \(\rho\) 和
+\(\dot\rho=d\rho/dt\) 表示第 7 章定义的参考曲率及其时间变化率。
+在线性模型中假设
+\[
+\delta,\ \phi,\ \alpha,\ 
+\frac{v_{y1}}U,\ \frac{v_{y2}}U,\ 
+\frac{L_1r_1}U,\ \frac{L_2r_2}U,\ 
+L_1\rho,\ L_2\rho,\ 
+\frac{L_1^2\dot\rho}{U},\ \frac{L_2^2\dot\rho}{U}
+=O(\varepsilon).
+\]
+
+第 7 章的误差量同样纳入该阶次表：
+\[
+e_\psi,\ \frac{e_x}{L_1},\ \frac{e_y}{L_1}
+=O(\varepsilon).
+\tag{K0}
+\]
+式 (K0) 不是额外假设，而是第 7 章线性化本来就隐含的前提；把它写出来是为了让
+\(\rho e_x\)、\(\rho e_y\) 这类乘积的二阶性可以直接判定（见 1.4 节第 1 条）。
+
+1. **非线性运动学**：纯滚动，以卡车后轴前向速度 \(U_1\) 为输入，可保留
+   \(\tan\delta,\sin\phi,\cos\phi\)；
+2. **线性横向动力学**：\(U>0\) 恒定，小 \(\delta,\phi,\alpha\)，线性轮胎；
+3. **误差状态模型**：在线性横向动力学上叠加时间参数化参考轨迹。
+
+动力学模型不包含纵向加减速、强制动/驱动、轮胎饱和、载荷转移和大铰接角。
+
+### 1.4 假设边界与失效条件
+
+以下四条是使用本文矩阵时最容易被忽略的边界。每条都给出**严格条件**和**违反时的量级**，
+便于判断某个工况还能不能用这套模型。逐式推导见
+[`2_truck_model_derivation.md`](2_truck_model_derivation.md) 第 11 章。
+
+#### 1.4.1 纵向匹配 \(e_x\)：不是不变流形
+
+时间参考点以恒定 \(U\) 前进时，\(e_x\) 一般**不**保持为零：
+
+\[
+\boxed{
+\dot e_x=U\rho e_y+O(\varepsilon^2)U.
+}
+\tag{K0a}
+\]
+
+\(U=15\,\mathrm{m/s}\)、\(\rho=0.02\,\mathrm m^{-1}\)、\(e_y=2\,\mathrm m\) 时
+\(\dot e_x=0.6\,\mathrm{m/s}\)，几秒内就能积累到米级。
+
+因此第 7 章的 \(e_x\equiv0\) **不应读作精确恒等式**。正确的解释有两种，二者给出同一组矩阵：
+
+1. **一阶解释（本文采用）**：由式 (K0)，\(\rho e_x=O(\varepsilon^2)\)，
+   所以 (K34) 的 \(-U\rho e_x\) 项本来就低于保留阶次，与 \(e_x\) 是否恰好为零无关。
+   六状态模型是原点附近一致的一阶横向子系统，纵向误差在该阶次上解耦。
+2. **工程解释**：控制器每拍把参考点重新投影到车辆当前位置（最近点匹配），
+   使 \(e_x\) 在每个采样点被重置为 \(O(\varepsilon^2)\)。仓库实现走这条路：
+   `DemoSession::updatePathProgress` 调用 `ReferencePath::project` 做有界弧长最近点投影。
+
+**失效条件**：大横向误差叠加大曲率时 \(\rho e_y\) 不再是小量，
+一阶解释与工程解释同时失效，必须改用严格 Frenet 模型（含 \(\dot s\) 与 \(1-\rho e_y\) 项）。
+
+#### 1.4.2 纵向铰接力：需要附加阶次条件
+
+式 (K8) 的拖车横向方程丢弃了铰接纵向力的横向投影。精确投影为
+\(-F_{hx}\sin\phi-H\cos\phi\)（推导见 (D44)），其中被丢弃的
+
+\[
+-F_{hx}\sin\phi=-F_{hx}\phi+O(\varepsilon^3)
+\]
+
+在 \(F_{hx}\) 为 \(O(1)\) 时是**一阶项**，不能仅以"\(\phi\) 小"为由删除。使用 (K8) 需要
+
+\[
+\boxed{
+F_{hx,0}=0
+\quad\text{或}\quad
+F_{hx}=O(\varepsilon).
+}
+\tag{K8a}
+\]
+
+直线匀速巡航时 \(F_{hx}\) 只需克服拖车滚阻与气阻（\(18\,\mathrm t\) 拖车约
+\(1\text{–}3\,\mathrm{kN}\)），相对 \(10\text{–}30\,\mathrm{kN}\) 量级的轮胎侧向力属于高阶小量，
+条件近似成立。但**牵引或制动时不成立**：\(F_{hx}=30\,\mathrm{kN}\)、\(\phi=0.05\) 时，
+拖车横向方程漏掉约 \(1.5\,\mathrm{kN}\)，偏航方程漏掉约
+\(a_2F_{hx}\phi=6\,\mathrm{kN\,m}\)。
+
+**失效条件**：需要建模急加速、急制动或坡道牵引时，必须把 \(F_{hx}\) 显式引入
+(K8)，模型维数和输入都会增加；本文矩阵不适用。
+
+#### 1.4.3 变速工况：\(\dot U\neq0\) 的遗漏项
+
+全文动力学层设 \(U\) 恒定。若 \(U=U(t)\)，以下三处各多出一项：
+
+| 位置 | 恒速形式 | 变速时新增 |
+|---|---|---|
+| 约束微分 (K12) | \(\dot v_{y1}-d_1\dot r_1-\dot v_{y2}-a_2\dot r_2+U(r_1-r_2)=0\) | \(+\dot U\phi\) |
+| \(\ddot e_y\)（(K39) 第 2 行） | \(\ddot e_y=\dot v_{y1}+U\dot e_\psi\) | \(+\dot U e_\psi\) |
+| \(\ddot e_\psi\)（(K41) 通道） | \(\ddot e_\psi=\dot r_1-U\dot\rho\) | \(-\dot U\rho\) |
+
+此外轮胎公式含 \(1/U\)，\(A_p,B_p,A_c,B_c\) 全部随时间变化。
+
+仓库采用**准 LPV（冻结时间）调度**而不是时变模型：
+`DemoSession::updateAdaptiveSpeed` 在 \(|U-U_{\mathrm{sched}}|\ge0.25\,\mathrm{m/s}\)
+（`kModelSpeedScheduleThreshold`）时用当前车速重建 \(A_p,B_p,A_c,B_c\)，
+每次重建之间仍按恒速模型处理。
+
+量级：最大减速度 \(\dot U=-2.5\,\mathrm{m/s^2}\)、\(\phi=0.1\) 时
+\(|\dot U\phi|=0.25\,\mathrm{m/s^2}\)，而同工况 \(U(r_1-r_2)\) 在
+\(U=15,\ r_1-r_2=0.1\) 时为 \(1.5\,\mathrm{m/s^2}\)，即约 **17%** 的相对误差。
+
+**失效条件**：缓加减速（\(|\dot U|\lesssim0.5\,\mathrm{m/s^2}\)）下冻结时间近似可接受；
+急制动配合大铰接角时上述项不可忽略，应改用含 \(\dot U\) 的时变模型。
+
+#### 1.4.4 曲率率 \(\dot\rho\)：时间导数，不是空间导数
+
+全文 \(\dot\rho\) 一律是**对时间**的导数。参考线通常按弧长给出
+\(\rho(t)=\kappa(s(t))\)，取 \(\dot s=U\) 得
+
+\[
+\boxed{
+\dot\rho=\frac{d\rho}{dt}=U\,\frac{d\kappa}{ds},
+\qquad
+[\dot\rho]=\mathrm m^{-1}\mathrm s^{-1}.
+}
+\tag{K41a}
+\]
+
+该式对变速同样成立（只要 \(\dot s=U\)）。
+
+**接口含义**：`ReferencePath::curvatureDerivative` 是 \(d\kappa/ds\)，单位
+\(\mathrm m^{-2}\)；`CurvatureSample::curvatureRate` 要求 \(\dot\rho\)，单位
+\(\mathrm m^{-1}\mathrm s^{-1}\)。**把 \(d\kappa/ds\) 直接填进 MPC 会少一个速度因子。**
+正确写法见 `DemoSession::step`：
+
+```cpp
+preview.push_back({reference.curvature,
+                   currentSpeed_ * reference.curvatureDerivative});
+```
+
+只有直线和定半径圆弧才有 \(\dot\rho=0\)。
+
+---
+
+## 2. 精确非线性运动学
+
+铰接点记为 \(P_h\)，其全局坐标记为 \((X_h,Y_h)\)。选择铰接点位置和两车航向作为状态：
+
+\[
+\boxed{
+\boldsymbol x_{\mathrm{kin}}=
+\begin{bmatrix}
+X_h&Y_h&\theta_1&\theta_2
+\end{bmatrix}^{T}.
+}
+\tag{K2}
+\]
+
+卡车偏航角速度：
+
+\[
+\boxed{
+r_1=\frac{U_1}{L_1}\tan\delta.
+}
+\tag{K3}
+\]
+
+铰接点在卡车坐标系中的速度分量为：
+
+\[
+\boxed{
+\begin{bmatrix}
+v_{P_h,x1}\\v_{P_h,y1}
+\end{bmatrix}
+=
+\begin{bmatrix}
+U_1\\(b_1-d_1)r_1
+\end{bmatrix}.
+}
+\tag{K4}
+\]
+
+非线性运动学方程：
+
+\[
+\boxed{
+\begin{aligned}
+\dot X_h&=U_1\cos\theta_1-(b_1-d_1)r_1\sin\theta_1,\\
+\dot Y_h&=U_1\sin\theta_1+(b_1-d_1)r_1\cos\theta_1,\\
+\dot\theta_1&=r_1,\\
+\dot\theta_2&=
+\frac{U_1\sin\phi+(b_1-d_1)r_1\cos\phi}{L_2},\\
+\dot\phi&=
+r_1-\frac{U_1\sin\phi+(b_1-d_1)r_1\cos\phi}{L_2}.
+\end{aligned}}
+\tag{K5}
+\]
+
+当铰接点位于卡车后轴中心，即 \(d_1=b_1\)：
+
+\[
+\boxed{
+\begin{aligned}
+\dot X_h&=U_1\cos\theta_1,\\
+\dot Y_h&=U_1\sin\theta_1,\\
+\dot\theta_1&=\frac{U_1}{L_1}\tan\delta,\\
+\dot\theta_2&=\frac{U_1}{L_2}\sin\phi,\\
+\dot\phi&=\frac{U_1}{L_1}\tan\delta-\frac{U_1}{L_2}\sin\phi.
+\end{aligned}}
+\tag{K6}
+\]
+
+精确运动学中，拖车轴沿自身前向的速度为
+\(U_2=U_1\cos\phi-(b_1-d_1)r_1\sin\phi\)，一般不等于 \(U_1\)。
+在线性横向动力学中，二者在直线平衡点附近满足
+\(U_1=U_2=U+O(\varepsilon^2)\)，因此后文统一使用名义纵速 \(U\)。
+
+---
+
+## 3. 线性横向动力学基础
+
+### 3.1 轮胎侧偏角与横向力
+
+定义 \(v_{y1}\) 和 \(v_{y2}\) 分别为卡车、拖车质心速度在各自车体左向上的分量；
+\(r_1,r_2\) 分别为两车逆时针为正的偏航角速度。
+
+本文定义侧偏角为“车轮指向角减去接地点速度方向角”，并采用
+\(F_y=C_\alpha\alpha\)：
+
+\[
+\boxed{
+\begin{aligned}
+\alpha_{1f}
+&=\delta-\frac{v_{y1}+a_1r_1}{U},
+&F_{1f}&=C_{1f}\alpha_{1f},\\
+\alpha_{1r}
+&=-\frac{v_{y1}-b_1r_1}{U},
+&F_{1r}&=C_{1r}\alpha_{1r},\\
+\alpha_{2r}
+&=-\frac{v_{y2}-b_2r_2}{U},
+&F_{2r}&=C_{2r}\alpha_{2r}.
+\end{aligned}}
+\tag{K7}
+\]
+
+### 3.2 两车受力与偏航方程
+
+小转角下 \(\cos\delta\approx1\)，忽略纵向铰接力对横向子系统的作用：
+
+\[
+\boxed{
+\begin{aligned}
+m_1(\dot v_{y1}+Ur_1)&=F_{1f}+F_{1r}+H,\\
+I_1\dot r_1&=a_1F_{1f}-b_1F_{1r}-d_1H,\\
+m_2(\dot v_{y2}+Ur_2)&=F_{2r}-H,\\
+I_2\dot r_2&=-b_2F_{2r}-a_2H.
+\end{aligned}}
+\tag{K8}
+\]
+
+![线性横向动力学自由体图](images/lateral_force_diagram.svg)
+
+\(H\) 是拖车作用于卡车的铰接横向力，向左为正。图中将同一铰接点拆成
+两个自由体，以同时标出 \(+H\) 与 \(-H\)。
+
+---
+
+## 4. 正确的铰接点速度约束
+
+精确的横向投影关系为：
+
+\[
+\boxed{
+v_{y2}+a_2r_2
+=U_1\sin\phi+(v_{y1}-d_1r_1)\cos\phi.
+}
+\tag{K9}
+\]
+
+在线性动力学平衡点附近取 \(U_1=U+O(\varepsilon^2)\)，一阶线性化得到：
+
+\[
+\boxed{
+v_{y1}-d_1r_1-v_{y2}-a_2r_2+U\phi=0.
+}
+\tag{K10}
+\]
+
+因此：
+
+\[
+\boxed{
+v_{y2}=v_{y1}-d_1r_1-a_2r_2+U\phi.
+}
+\tag{K11}
+\]
+
+在 \(U\) 恒定时，对式 (K10) 求导：
+
+\[
+\boxed{
+\dot v_{y1}-d_1\dot r_1-\dot v_{y2}-a_2\dot r_2
++U(r_1-r_2)=0.
+}
+\tag{K12}
+\]
+
+即：
+
+\[
+\boxed{
+\dot v_{y2}
+=\dot v_{y1}-d_1\dot r_1-a_2\dot r_2+U(r_1-r_2).
+}
+\tag{K13}
+\]
+
+式 (K10) 中的 \(U\phi\) 与式 (K12) 中的 \(U(r_1-r_2)\) 都是一阶项，
+不能在小角度线性化中删除。
+
+将式 (K11) 代入拖车轮胎力：
+
+\[
+\boxed{
+\begin{aligned}
+F_{2r}
+&=C_{2r}\left[
+-\frac{v_{y1}-d_1r_1-L_2r_2+U\phi}{U}
+\right]\\
+&=-\frac{C_{2r}}U v_{y1}
++\frac{d_1C_{2r}}U r_1
++\frac{L_2C_{2r}}U r_2
+-C_{2r}\phi.
+\end{aligned}}
+\tag{K14}
+\]
+
+---
+
+## 5. 直接消除铰接力：完整矩阵
+
+定义三维速度变量：
+
+\[
+\boxed{
+\boldsymbol\eta=
+\begin{bmatrix}
+v_{y1}&r_1&r_2
+\end{bmatrix}^{T}.
+}
+\tag{K15}
+\]
+
+利用式 (K13) 消除 \(\dot v_{y2}\)，并利用拖车横向方程消除 \(H\)，得到：
+
+\[
+\boxed{
+M_e\dot{\boldsymbol\eta}
+=K_e\boldsymbol\eta+\boldsymbol k_\phi\phi+\boldsymbol G_e\delta.
+}
+\tag{K16}
+\]
+
+### 5.1 有效质量矩阵
+
+\[
+\boxed{
+M_e=
+\begin{bmatrix}
+m_1+m_2&-m_2d_1&-m_2a_2\\
+-m_2d_1&I_1+m_2d_1^2&m_2d_1a_2\\
+-m_2a_2&m_2d_1a_2&I_2+m_2a_2^2
+\end{bmatrix}.
+}
+\tag{K17}
+\]
+
+### 5.2 完整速度系数矩阵
+
+\[
+\boxed{
+K_e=
+\begin{bmatrix}
+-\dfrac{C_{1f}+C_{1r}+C_{2r}}U
+&
+\dfrac{-a_1C_{1f}+b_1C_{1r}+d_1C_{2r}}U-(m_1+m_2)U
+&
+\dfrac{L_2C_{2r}}U
+\\[3mm]
+\dfrac{-a_1C_{1f}+b_1C_{1r}+d_1C_{2r}}U
+&
+-\dfrac{a_1^2C_{1f}+b_1^2C_{1r}+d_1^2C_{2r}}U+m_2d_1U
+&
+-\dfrac{d_1L_2C_{2r}}U
+\\[3mm]
+\dfrac{L_2C_{2r}}U
+&
+-\dfrac{d_1L_2C_{2r}}U+m_2a_2U
+&
+-\dfrac{L_2^2C_{2r}}U
+\end{bmatrix}.
+}
+\tag{K18}
+\]
+
+### 5.3 铰接角列与输入列
+
+\[
+\boxed{
+\boldsymbol k_\phi=C_{2r}
+\begin{bmatrix}
+-1\\d_1\\L_2
+\end{bmatrix},
+\qquad
+\boldsymbol G_e=
+\begin{bmatrix}
+C_{1f}\\a_1C_{1f}\\0
+\end{bmatrix}.
+}
+\tag{K19}
+\]
+
+### 5.4 四状态描述矩阵形式
+
+下面的 \(\mathcal M\) 是**描述矩阵**（descriptor matrix），不是纯质量矩阵：
+前三行携带惯性量纲，第四行是运动学恒等式 \(\dot\phi=r_1-r_2\)，其"\(1\)"无量纲。
+因此不要对 \(\mathcal M\) 整体做量纲检查或物理解释，只对左上 \(3\times3\) 块
+（即 \(M_e\)）这样做。
+
+定义完整动力学状态：
+
+\[
+\boxed{
+\boldsymbol x_p=
+\begin{bmatrix}
+v_{y1}&r_1&r_2&\phi
+\end{bmatrix}^{T}.
+}
+\tag{K20}
+\]
+
+\[
+\boxed{
+\mathcal M\dot{\boldsymbol x}_p
+=\mathcal K\boldsymbol x_p+\mathcal G\delta,
+}
+\tag{K21}
+\]
+
+其中：
+
+\[
+\boxed{
+\mathcal M=
+\begin{bmatrix}
+m_1+m_2&-m_2d_1&-m_2a_2&0\\
+-m_2d_1&I_1+m_2d_1^2&m_2d_1a_2&0\\
+-m_2a_2&m_2d_1a_2&I_2+m_2a_2^2&0\\
+0&0&0&1
+\end{bmatrix},
+}
+\tag{K22}
+\]
+
+\[
+\boxed{
+\mathcal K=
+\begin{bmatrix}
+(K_e)_{11}&(K_e)_{12}&(K_e)_{13}&-C_{2r}\\
+(K_e)_{21}&(K_e)_{22}&(K_e)_{23}&d_1C_{2r}\\
+(K_e)_{31}&(K_e)_{32}&(K_e)_{33}&L_2C_{2r}\\
+0&1&-1&0
+\end{bmatrix},
+\qquad
+\mathcal G=
+\begin{bmatrix}
+C_{1f}\\a_1C_{1f}\\0\\0
+\end{bmatrix}.
+}
+\tag{K23}
+\]
+
+第四行就是 \(\dot\phi=r_1-r_2\)。
+
+---
+
+## 6. 标准四状态模型：完整展开方法
+
+定义：
+
+\[
+\boxed{
+A_v=M_e^{-1}K_e=
+\begin{bmatrix}
+a_{11}&a_{12}&a_{13}\\
+a_{21}&a_{22}&a_{23}\\
+a_{31}&a_{32}&a_{33}
+\end{bmatrix},
+}
+\tag{K24}
+\]
+
+\[
+\boxed{
+\boldsymbol a_\phi=M_e^{-1}\boldsymbol k_\phi=
+\begin{bmatrix}
+a_{14}\\a_{24}\\a_{34}
+\end{bmatrix},
+\qquad
+\boldsymbol\beta=M_e^{-1}\boldsymbol G_e=
+\begin{bmatrix}
+\beta_1\\\beta_2\\\beta_3
+\end{bmatrix}.
+}
+\tag{K25}
+\]
+
+标准模型：
+
+\[
+\boxed{
+\dot{\boldsymbol x}_p=A_p\boldsymbol x_p+B_p\delta,
+}
+\tag{K26}
+\]
+
+\[
+\boxed{
+A_p=
+\begin{bmatrix}
+a_{11}&a_{12}&a_{13}&a_{14}\\
+a_{21}&a_{22}&a_{23}&a_{24}\\
+a_{31}&a_{32}&a_{33}&a_{34}\\
+0&1&-1&0
+\end{bmatrix},
+\qquad
+B_p=
+\begin{bmatrix}
+\beta_1\\\beta_2\\\beta_3\\0
+\end{bmatrix}.
+}
+\tag{K27}
+\]
+
+### 6.1 \(M_e^{-1}\) 的完整形式
+
+令：
+
+\[
+\begin{aligned}
+\mu_{11}&=m_1+m_2,&
+\mu_{12}&=-m_2d_1,&
+\mu_{13}&=-m_2a_2,\\
+\mu_{22}&=I_1+m_2d_1^2,&
+\mu_{23}&=m_2d_1a_2,&
+\mu_{33}&=I_2+m_2a_2^2.
+\end{aligned}
+\tag{K28}
+\]
+
+\[
+\boxed{
+\begin{aligned}
+\Delta={}&
+\mu_{11}(\mu_{22}\mu_{33}-\mu_{23}^2)
+-\mu_{12}(\mu_{12}\mu_{33}-\mu_{13}\mu_{23})\\
+&+\mu_{13}(\mu_{12}\mu_{23}-\mu_{13}\mu_{22}).
+\end{aligned}}
+\tag{K29}
+\]
+
+式 (K29) 可化简为
+\[
+\Delta=(m_1+m_2)I_1I_2
++m_1m_2\left(I_1a_2^2+I_2d_1^2\right)>0,
+\]
+其中 \(m_1,m_2,I_1,I_2>0\)。因此 \(M_e\) 可逆。
+
+更强也更直接的结论是 \(M_e\) **正定**。对任意
+\(\boldsymbol\xi=[x,y,z]^T\) 配方可得
+
+\[
+\boxed{
+\boldsymbol\xi^TM_e\boldsymbol\xi
+=m_1x^2+I_1y^2+I_2z^2
++m_2\left(x-d_1y-a_2z\right)^2>0,
+\qquad \boldsymbol\xi\neq\boldsymbol 0.
+}
+\tag{K29a}
+\]
+
+括号内正是铰接点横向速度的组合，所以式 (K29a) 也说明：\(M_e\) 的正定性来自两车
+自身惯性，与 \(d_1,a_2\) 取值无关。特别地 **\(d_1=b_1\) 不会使 \(M_e\) 退化**，
+第 5 章的消元在后轴铰接工况同样成立。
+
+\[
+\boxed{
+M_e^{-1}=
+\begin{bmatrix}
+q_{11}&q_{12}&q_{13}\\
+q_{12}&q_{22}&q_{23}\\
+q_{13}&q_{23}&q_{33}
+\end{bmatrix},
+}
+\tag{K30}
+\]
+
+\[
+\boxed{
+\begin{aligned}
+q_{11}&=\frac{\mu_{22}\mu_{33}-\mu_{23}^2}{\Delta},&
+q_{12}&=\frac{\mu_{13}\mu_{23}-\mu_{12}\mu_{33}}{\Delta},\\
+q_{13}&=\frac{\mu_{12}\mu_{23}-\mu_{13}\mu_{22}}{\Delta},&
+q_{22}&=\frac{\mu_{11}\mu_{33}-\mu_{13}^2}{\Delta},\\
+q_{23}&=\frac{\mu_{12}\mu_{13}-\mu_{11}\mu_{23}}{\Delta},&
+q_{33}&=\frac{\mu_{11}\mu_{22}-\mu_{12}^2}{\Delta}.
+\end{aligned}}
+\tag{K31}
+\]
+
+### 6.2 \(A_p,B_p\) 每个元素
+
+对 \(i=1,2,3\)：
+
+\[
+\boxed{
+\begin{aligned}
+a_{i1}&=q_{i1}(K_e)_{11}+q_{i2}(K_e)_{21}+q_{i3}(K_e)_{31},\\
+a_{i2}&=q_{i1}(K_e)_{12}+q_{i2}(K_e)_{22}+q_{i3}(K_e)_{32},\\
+a_{i3}&=q_{i1}(K_e)_{13}+q_{i2}(K_e)_{23}+q_{i3}(K_e)_{33},\\
+a_{i4}&=C_{2r}(-q_{i1}+d_1q_{i2}+L_2q_{i3}),\\
+\beta_i&=C_{1f}(q_{i1}+a_1q_{i2}).
+\end{aligned}}
+\tag{K32}
+\]
+
+其中对称下标约定为
+\(q_{21}=q_{12},q_{31}=q_{13},q_{32}=q_{23}\)。
+
+---
+
+## 7. 六状态路径误差模型
+
+令 \(\boldsymbol p_{O_1}\) 为卡车质心的全局位置。时间参考点
+\(\boldsymbol p_{\mathrm{ref}}(t)\) 以速度 \(U\) 沿参考切向
+\(\boldsymbol t_{\mathrm{ref}}\) 运动；参考切向航向为
+\(\theta_{\mathrm{ref}}\)，参考左向单位向量为
+\(\boldsymbol n_{\mathrm{ref}}\)。定义纵向、横向匹配误差：
+\[
+e_x=\boldsymbol t_{\mathrm{ref}}^T
+\left(\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}}\right),
+\qquad
+e_y=\boldsymbol n_{\mathrm{ref}}^T
+\left(\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}}\right).
+\]
+精确求导包含
+\[
+\dot e_y=-U\rho e_x+U\sin e_\psi+v_{y1}\cos e_\psi.
+\]
+由 1.3 节的阶次表 (K0)，\(e_x/L_1=O(\varepsilon)\) 且 \(L_1\rho=O(\varepsilon)\)，
+故 \(U\rho e_x=O(\varepsilon^2)U\) 低于保留阶次而脱落；再对
+\(e_\psi,v_{y1}/U\) 作一阶线性化即得 (K34)。因此本文六状态模型是**时间参数化的一阶
+小误差模型**，不是严格最近点 Frenet 模型。
+
+注意 \(e_x\) 一般**不**恒为零：由式 (K0a) 有 \(\dot e_x=U\rho e_y+O(\varepsilon^2)U\)。
+"纵向匹配"只在一阶意义下成立，详见 1.4.1 节。
+定义左转为正的参考曲率 \(\rho=\rho(t)\in C^1\)，
+\(\dot\rho=d\rho/dt\)。于是：
+
+\[
+\boxed{
+e_\psi=\theta_1-\theta_{\mathrm{ref}},
+\qquad
+\dot\theta_{\mathrm{ref}}=U\rho.
+}
+\tag{K33}
+\]
+
+![六状态路径误差几何](images/path_error_geometry.svg)
+
+\(e_y\) 定义在卡车质心 \(O_1\)。一阶纵向匹配把 \(O_1\) 视为落在参考法向
+\(\boldsymbol n_{\mathrm{ref}}\) 上，即 \(e_x=O(\varepsilon)\) 且其与 \(\rho\) 的乘积可略。
+
+时间参数化参考轨迹的小误差运动学：
+
+\[
+\boxed{
+\dot e_y=v_{y1}+Ue_\psi,
+\qquad
+\dot e_\psi=r_1-U\rho.
+}
+\tag{K34}
+\]
+
+控制状态：
+
+\[
+\boxed{
+\boldsymbol x_c=
+\begin{bmatrix}
+e_y&\dot e_y&e_\psi&\dot e_\psi&\phi&\dot\phi
+\end{bmatrix}^{T}.
+}
+\tag{K35}
+\]
+
+物理状态转换：
+
+\[
+\boxed{
+\boldsymbol x_p=T\boldsymbol x_c+\boldsymbol t_\rho\rho,
+}
+\tag{K36}
+\]
+
+\[
+\boxed{
+T=
+\begin{bmatrix}
+0&1&-U&0&0&0\\
+0&0&0&1&0&0\\
+0&0&0&1&0&-1\\
+0&0&0&0&1&0
+\end{bmatrix},
+\qquad
+\boldsymbol t_\rho=
+\begin{bmatrix}
+0\\U\\U\\0
+\end{bmatrix}.
+}
+\tag{K37}
+\]
+
+若物理矩阵使用式 (K27) 的 \(a_{ij},\beta_i\)，则：
+
+\[
+\boxed{
+\dot{\boldsymbol x}_c
+=A_c\boldsymbol x_c+B_c\delta
++E_\rho\rho+E_{\dot\rho}\dot\rho.
+}
+\tag{K38}
+\]
+
+\[
+\boxed{
+A_c=
+\begin{bmatrix}
+0&1&0&0&0&0\\
+0&a_{11}&-Ua_{11}&a_{12}+a_{13}+U&a_{14}&-a_{13}\\
+0&0&0&1&0&0\\
+0&a_{21}&-Ua_{21}&a_{22}+a_{23}&a_{24}&-a_{23}\\
+0&0&0&0&0&1\\
+0&a_{21}-a_{31}&-U(a_{21}-a_{31})&
+a_{22}-a_{32}+a_{23}-a_{33}&
+a_{24}-a_{34}&-a_{23}+a_{33}
+\end{bmatrix}.
+}
+\tag{K39}
+\]
+
+\[
+\boxed{
+B_c=
+\begin{bmatrix}
+0\\\beta_1\\0\\\beta_2\\0\\\beta_2-\beta_3
+\end{bmatrix}.
+}
+\tag{K40}
+\]
+
+\[
+\boxed{
+E_\rho=
+U\begin{bmatrix}
+0\\
+a_{12}+a_{13}\\
+0\\
+a_{22}+a_{23}\\
+0\\
+a_{22}-a_{32}+a_{23}-a_{33}
+\end{bmatrix},
+\qquad
+E_{\dot\rho}=
+\begin{bmatrix}
+0\\0\\0\\-U\\0\\0
+\end{bmatrix}.
+}
+\tag{K41}
+\]
+
+式 (K41) 的 \(\dot\rho\) 是**时间导数**。参考线按弧长给出时必须先按式 (K41a)
+换算 \(\dot\rho=U\,d\kappa/ds\) 再代入，否则该通道会整体差一个速度因子；
+接口对应关系见 1.4.4 节。
+
+\(A_c,B_c,E_\rho,E_{\dot\rho}\) 均随 \(U\) 变化。变速工况下它们不仅要重新求值，
+还会多出 1.4.3 节列出的 \(\dot U\) 项；仓库按冻结时间（准 LPV）方式处理。
+
