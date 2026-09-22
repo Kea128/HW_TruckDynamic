@@ -161,6 +161,12 @@ public:
     // Settings that put v2 on the controller and v1 in the shadow, so the two
     // can be read off the same run.
     [[nodiscard]] static DemoSettings fusionComparisonSettings();
+    // Both sides run the v2 machinery and differ only in process model, so the
+    // model is compared without the out-of-sequence changes mixed in.
+    [[nodiscard]] static DemoSettings modelComparisonSettings();
+    // The comparison above plus the articulation tracking experiment, so the
+    // filters are judged while the controller is closing the loop on them.
+    [[nodiscard]] static DemoSettings fusionTrackingComparisonSettings();
 
 private:
     [[nodiscard]] VehicleSnapshot vehicleSnapshot() const;

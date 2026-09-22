@@ -36,6 +36,11 @@ private:
     void plotArticulationCell(
         const DemoSession& session,
         bool darkTheme);
+    // phiDot is reconstructed from the model, never measured, so it needs the
+    // same truth-versus-estimate treatment as the angle itself.
+    void plotArticulationRateCell(
+        const DemoSession& session,
+        bool darkTheme);
     void plotCell(
         const DemoSession& session,
         bool darkTheme,
@@ -55,6 +60,8 @@ private:
     std::vector<double> articulation_;
     std::vector<double> articulationReference_;
     std::vector<double> articulationRate_;
+    std::vector<double> plantArticulationRate_;
+    std::vector<double> shadowArticulationRate_;
     std::vector<double> plantArticulation_;
     std::vector<double> shadowArticulation_;
     std::vector<double> lidarArticulation_;
@@ -71,7 +78,12 @@ private:
     double primaryRmseDeg_{};
     double shadowRmseDeg_{};
     double lidarRmseDeg_{};
+    double primaryRateRmseDeg_{};
+    double shadowRateRmseDeg_{};
     bool comparisonValid_{};
+    // Top of the current grid cell, so plot height can be derived from the row
+    // height instead of from whatever space happens to be left in the window.
+    float cellTop_{};
     std::size_t cachedTelemetryRevision_{
         std::numeric_limits<std::size_t>::max()};
     float plotRowHeight_{220.0f};

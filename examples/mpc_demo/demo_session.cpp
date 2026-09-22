@@ -169,7 +169,14 @@ std::string DemoSettings::validationError() const {
         inputSpeedNoiseStd > 5.0) {
         errors << "inputSpeedNoiseStd must be finite and within [0, 5] m/s; ";
     }
-    if (lidarDelayMax > articulationEstimator.historyHorizon) {
+    // A window shorter than the worst-case latency silently discards scans, so
+    // it is rejected. Legacy compatibility mode is exempt: reproducing that
+    // packet loss is the entire point of running the old filter.
+    const bool legacyPrimary =
+        articulationEstimator.compatibility.nearestFrameAlignment ||
+        articulationEstimator.compatibility.diagonalEulerProcessNoise;
+    if (!legacyPrimary &&
+        lidarDelayMax > articulationEstimator.historyHorizon) {
         errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
                   "scans stay inside the replay window; ";
     }
@@ -626,6 +633,30 @@ DemoSettings DemoSession::fusionComparisonSettings() {
     settings.adaptiveSpeedEnabled = false;
     settings.shadowEstimatorEnabled = true;
     settings.shadowEstimator = legacyFusionConfig();
+    settings.applyEstimatorMeasurementFromLidar();
+    return settings;
+}
+
+DemoSettings DemoSession::modelComparisonSettings() {
+    auto settings = fusionComparisonSettings();
+    // Both sides use the v2 machinery; only the process model differs, which
+    // isolates the model from the out-of-sequence and noise changes.
+    settings.shadowEstimator = settings.articulationEstimator;
+    settings.shadowEstimator.processModel =
+        truck_model::ArticulationProcessModel::dynamic;
+    settings.applyEstimatorMeasurementFromLidar();
+    return settings;
+}
+
+DemoSettings DemoSession::fusionTrackingComparisonSettings() {
+    auto settings = fusionComparisonSettings();
+    settings.articulationTrackingExperiment = true;
+    settings.articulationReference.kind = ArticulationReferenceKind::sine;
+    settings.articulationReference.amplitude = 0.12;
+    settings.articulationReference.frequency = 0.12;
+    settings.articulationReference.duration = 40.0;
+    // Closing the loop on the estimate is the stress case: a thin phiDot is
+    // amplified by the controller instead of merely observed.
     settings.applyEstimatorMeasurementFromLidar();
     return settings;
 }

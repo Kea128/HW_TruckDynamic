@@ -14,6 +14,17 @@ double degrees(double radians) {
     return radians * 180.0 / kPi;
 }
 
+// One palette shared by the angle and rate plots. The traces carry different
+// meanings, so they are separated by hue rather than by shade: the previous
+// reference and shadow colours were both amber and read as the same line.
+const ImVec4 kPlantColor{0.30f, 0.86f, 0.42f, 1.0f};    // ground truth, green
+const ImVec4 kReferenceColor{1.00f, 0.38f, 0.76f, 1.0f};  // target, magenta
+const ImVec4 kLidarColor{0.58f, 0.55f, 0.70f, 1.0f};    // raw sensor, muted
+const ImVec4 kShadowColor{1.00f, 0.66f, 0.10f, 1.0f};   // v1, amber
+const ImVec4 kPrimaryColor{0.20f, 0.74f, 1.00f, 1.0f};  // v2, cyan
+const ImVec4 kMarkerFill{0.96f, 0.97f, 1.00f, 1.0f};
+const ImVec4 kMarkerEdge{0.45f, 0.52f, 0.62f, 1.0f};
+
 }  // namespace
 
 void TelemetryPanel::render(
@@ -77,16 +88,7 @@ void TelemetryPanel::render(
         if (ImGui::BeginTabItem(u8"铰接与横摆动态")) {
             if (beginPlotGrid("##ArticulationPlots")) {
                 plotArticulationCell(session, darkTheme);
-                plotCell(
-                    session,
-                    darkTheme,
-                    "articulation_rate_plot",
-                    u8"铰接角速度",
-                    u8"phi_dot [deg/s]",
-                    articulationRate_,
-                    -35.0,
-                    35.0,
-                    "%.2f");
+                plotArticulationRateCell(session, darkTheme);
                 plotCell(
                     session,
                     darkTheme,
@@ -255,11 +257,16 @@ void TelemetryPanel::beginPlotCell() {
         ImGui::TableNextRow(ImGuiTableRowFlags_None, plotRowHeight_);
     }
     ImGui::TableNextColumn();
+    cellTop_ = ImGui::GetCursorPosY();
     plotCellsInRow_ = (plotCellsInRow_ + 1) % 2;
 }
 
 float TelemetryPanel::plotHeight() const {
-    return std::max(88.0f, ImGui::GetContentRegionAvail().y - 4.0f);
+    // Subtract whatever the caller already emitted as a header. Measuring the
+    // remaining window space instead makes the second row shorter than the
+    // first, and makes a cell with a taller header shrink its neighbours.
+    const float consumed = ImGui::GetCursorPosY() - cellTop_;
+    return std::max(88.0f, plotRowHeight_ - consumed - 6.0f);
 }
 
 float TelemetryPanel::currentMarkerSize(float plotHeight) const {
@@ -276,6 +283,8 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
     articulation_.resize(history.size());
     articulationReference_.resize(history.size());
     articulationRate_.resize(history.size());
+    plantArticulationRate_.resize(history.size());
+    shadowArticulationRate_.resize(history.size());
     plantArticulation_.resize(history.size());
     shadowArticulation_.resize(history.size());
     lidarArticulation_.resize(history.size());
@@ -295,6 +304,8 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
         articulation_[i] = degrees(history[i].state[4]);
         articulationReference_[i] = degrees(history[i].referenceArticulation);
         articulationRate_[i] = degrees(history[i].state[5]);
+        plantArticulationRate_[i] = degrees(history[i].plantArticulationRate);
+        shadowArticulationRate_[i] = degrees(history[i].shadowArticulationRate);
         plantArticulation_[i] = degrees(history[i].plantArticulation);
         shadowArticulation_[i] = degrees(history[i].shadowArticulation);
         lidarArticulation_[i] = degrees(history[i].lidarArticulation);
@@ -311,6 +322,8 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
     primaryRmseDeg_ = 0.0;
     shadowRmseDeg_ = 0.0;
     lidarRmseDeg_ = 0.0;
+    primaryRateRmseDeg_ = 0.0;
+    shadowRateRmseDeg_ = 0.0;
     comparisonValid_ = false;
     if (!session.settings().lidarFusionEnabled) {
         return;
@@ -319,6 +332,8 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
     double primarySse = 0.0;
     double shadowSse = 0.0;
     double lidarSse = 0.0;
+    double primaryRateSse = 0.0;
+    double shadowRateSse = 0.0;
     std::size_t scored = 0;
     for (const auto& sample : history) {
         if (sample.time < 1.0) {
@@ -330,9 +345,15 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
             sample.shadowArticulation - sample.plantArticulation;
         const double lidar =
             sample.lidarArticulation - sample.plantArticulation;
+        const double primaryRate =
+            sample.estimatedArticulationRate - sample.plantArticulationRate;
+        const double shadowRate =
+            sample.shadowArticulationRate - sample.plantArticulationRate;
         primarySse += primary * primary;
         shadowSse += shadow * shadow;
         lidarSse += lidar * lidar;
+        primaryRateSse += primaryRate * primaryRate;
+        shadowRateSse += shadowRate * shadowRate;
         ++scored;
     }
     if (scored == 0) {
@@ -344,6 +365,8 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
     primaryRmseDeg_ = rmse(primarySse);
     shadowRmseDeg_ = rmse(shadowSse);
     lidarRmseDeg_ = rmse(lidarSse);
+    primaryRateRmseDeg_ = rmse(primaryRateSse);
+    shadowRateRmseDeg_ = rmse(shadowRateSse);
     comparisonValid_ = true;
 }
 
@@ -429,26 +452,23 @@ void TelemetryPanel::plotArticulationCell(
             ImPlot::SetupAxes(nullptr, nullptr, 0, ImPlotAxisFlags_AutoFit);
         }
         if (!articulation_.empty()) {
+            // Raw sensor first so it sits behind everything, then truth, then
+            // the estimates that are judged against it.
             if (fusion) {
-                // Draw the reference the estimates are judged against first so
-                // the thinner estimate traces stay readable on top of it.
-                ImPlot::SetNextLineStyle(
-                    ImVec4(0.45f, 0.82f, 0.48f, 1.0f), 2.2f);
-                ImPlot::PlotLine(
-                    u8"Plant 真值",
-                    time_.data(),
-                    plantArticulation_.data(),
-                    static_cast<int>(plantArticulation_.size()));
-                ImPlot::SetNextLineStyle(
-                    ImVec4(0.78f, 0.55f, 1.0f, 1.0f), 1.3f);
+                ImPlot::SetNextLineStyle(kLidarColor, 1.2f);
                 ImPlot::PlotLine(
                     u8"雷达原始",
                     time_.data(),
                     lidarArticulation_.data(),
                     static_cast<int>(lidarArticulation_.size()));
+                ImPlot::SetNextLineStyle(kPlantColor, 2.4f);
+                ImPlot::PlotLine(
+                    u8"Plant 真值",
+                    time_.data(),
+                    plantArticulation_.data(),
+                    static_cast<int>(plantArticulation_.size()));
                 if (shadow) {
-                    ImPlot::SetNextLineStyle(
-                        ImVec4(0.95f, 0.72f, 0.28f, 1.0f), 1.6f);
+                    ImPlot::SetNextLineStyle(kShadowColor, 1.7f);
                     ImPlot::PlotLine(
                         estimatorDisplayName(
                             session.settings().shadowEstimator),
@@ -457,8 +477,7 @@ void TelemetryPanel::plotArticulationCell(
                         static_cast<int>(shadowArticulation_.size()));
                 }
             }
-            ImPlot::SetNextLineStyle(
-                ImVec4(0.22f, 0.68f, 1.0f, 1.0f), 2.0f);
+            ImPlot::SetNextLineStyle(kPrimaryColor, 2.0f);
             ImPlot::PlotLine(
                 fusion ? estimatorDisplayName(
                              session.settings().articulationEstimator)
@@ -466,11 +485,15 @@ void TelemetryPanel::plotArticulationCell(
                 time_.data(),
                 articulation_.data(),
                 static_cast<int>(articulation_.size()));
-            if (!session.articulationReference().empty()) {
-                ImPlot::SetNextLineStyle(
-                    ImVec4(1.0f, 0.56f, 0.20f, 1.0f), 2.0f);
+            // Drawn whenever a reference exists, including while a tracking
+            // experiment runs alongside the fusion comparison. In that closed
+            // loop the plant overshoots the reference, so the two are expected
+            // to differ in amplitude rather than overlap.
+            if (!session.articulationReference().empty() ||
+                session.settings().articulationTrackingExperiment) {
+                ImPlot::SetNextLineStyle(kReferenceColor, 2.2f);
                 ImPlot::PlotLine(
-                    u8"参考",
+                    u8"参考 phi_ref",
                     time_.data(),
                     articulationReference_.data(),
                     static_cast<int>(articulationReference_.size()));
@@ -480,14 +503,107 @@ void TelemetryPanel::plotArticulationCell(
             ImPlot::SetNextMarkerStyle(
                 ImPlotMarker_Circle,
                 currentMarkerSize(height),
-                ImVec4(1.0f, 0.56f, 0.20f, 1.0f),
+                kMarkerFill,
                 IMPLOT_AUTO,
-                ImVec4(1.0f, 0.82f, 0.45f, 1.0f));
+                kMarkerEdge);
             ImPlot::PlotScatter(
                 "##CurrentArticulation",
                 &currentTime,
                 &currentValue,
                 1);
+        }
+        ImPlot::EndPlot();
+    }
+}
+
+void TelemetryPanel::plotArticulationRateCell(
+    const DemoSession& session,
+    bool darkTheme) {
+    const bool fusion = session.settings().lidarFusionEnabled;
+    const bool shadow = session.settings().shadowEstimatorEnabled;
+
+    beginPlotCell();
+    ImGui::TextUnformatted(u8"铰接角速度");
+    ImGui::SameLine();
+    ImGui::TextDisabled(u8"· 当前");
+    ImGui::SameLine();
+    ImGui::TextColored(
+        darkTheme ? ImVec4(0.35f, 0.78f, 1.0f, 1.0f)
+                  : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
+        "%.2f",
+        articulationRate_.empty() ? 0.0 : articulationRate_.back());
+    if (fusion) {
+        // The lidar cannot observe phiDot at all, so this is pure model output
+        // and the only honest check is against the plant.
+        ImGui::SameLine();
+        ImGui::TextDisabled(u8"· 纯模型推算 RMSE");
+        ImGui::SameLine();
+        ImGui::TextColored(
+            darkTheme ? ImVec4(0.35f, 0.78f, 1.0f, 1.0f)
+                      : ImVec4(0.04f, 0.38f, 0.68f, 1.0f),
+            "%.2f",
+            comparisonValid_ ? primaryRateRmseDeg_ : 0.0);
+        if (shadow) {
+            ImGui::SameLine();
+            ImGui::TextColored(
+                ImVec4(0.95f, 0.72f, 0.28f, 1.0f),
+                "%.2f",
+                comparisonValid_ ? shadowRateRmseDeg_ : 0.0);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("deg/s");
+    }
+
+    const float height = plotHeight();
+    if (ImPlot::BeginPlot("##articulation_rate_plot", ImVec2(-1.0f, height))) {
+        ImPlot::SetupAxes(
+            u8"时间 [s]",
+            u8"phi_dot [deg/s]",
+            ImPlotAxisFlags_NoHighlight,
+            ImPlotAxisFlags_NoHighlight);
+        const double right = std::max(15.0, session.time());
+        ImPlot::SetupAxisLimits(
+            ImAxis_X1, right - 15.0, right, ImGuiCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, -35.0, 35.0, ImGuiCond_Once);
+        if (fusion) {
+            ImPlot::SetupAxes(nullptr, nullptr, 0, ImPlotAxisFlags_AutoFit);
+        }
+        if (!articulationRate_.empty()) {
+            if (fusion) {
+                ImPlot::SetNextLineStyle(kPlantColor, 2.4f);
+                ImPlot::PlotLine(
+                    u8"Plant 真值",
+                    time_.data(),
+                    plantArticulationRate_.data(),
+                    static_cast<int>(plantArticulationRate_.size()));
+                if (shadow) {
+                    ImPlot::SetNextLineStyle(kShadowColor, 1.7f);
+                    ImPlot::PlotLine(
+                        estimatorDisplayName(
+                            session.settings().shadowEstimator),
+                        time_.data(),
+                        shadowArticulationRate_.data(),
+                        static_cast<int>(shadowArticulationRate_.size()));
+                }
+            }
+            ImPlot::SetNextLineStyle(kPrimaryColor, 2.0f);
+            ImPlot::PlotLine(
+                fusion ? estimatorDisplayName(
+                             session.settings().articulationEstimator)
+                       : u8"实测",
+                time_.data(),
+                articulationRate_.data(),
+                static_cast<int>(articulationRate_.size()));
+            const double currentTime = time_.back();
+            const double currentValue = articulationRate_.back();
+            ImPlot::SetNextMarkerStyle(
+                ImPlotMarker_Circle,
+                currentMarkerSize(height),
+                kMarkerFill,
+                IMPLOT_AUTO,
+                kMarkerEdge);
+            ImPlot::PlotScatter(
+                "##CurrentArticulationRate", &currentTime, &currentValue, 1);
         }
         ImPlot::EndPlot();
     }
