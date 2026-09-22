@@ -510,8 +510,9 @@ void testLidarFusionTracksPlantArticulation() {
         "delayed EKF was worse than the raw delayed lidar");
 }
 
-// A variable latency lets a later scan overtake an earlier one. The estimator
-// has to reorder them by stamp and still converge.
+// A variable latency lets a later scan overtake an earlier one. The shell does
+// not reorder those: it refuses the overtaken scan as outOfOrder. What this
+// checks is that discarding them still leaves the estimate tracking.
 void testOutOfOrderDeliveryStillTracks() {
     truck_demo::DemoSession session;
     auto settings = session.settings();
@@ -778,6 +779,32 @@ void testHistoryHorizonMustCoverLatency() {
     require(
         rejected,
         "history horizon below the worst-case latency must be rejected");
+
+    // Two control periods of headroom are required, not one: delivery is
+    // quantised to the grid, and trim() leaves only historyHorizon minus one
+    // frame usable. One period still drops asynchronous scans.
+    auto borderline = session.settings();
+    borderline.lidarFusionEnabled = true;
+    borderline.lidarDelayMax = 0.40;
+    for (const double headroom : {0.0, 1.0}) {
+        auto tooTight = borderline;
+        tooTight.articulationEstimator.historyHorizon =
+            0.40 + headroom * tooTight.mpc.sampleTime;
+        bool tooTightRejected = false;
+        try {
+            session.configure(tooTight);
+        } catch (const std::invalid_argument&) {
+            tooTightRejected = true;
+        }
+        require(
+            tooTightRejected,
+            "fewer than two control periods of headroom must be rejected");
+    }
+
+    auto sufficient = borderline;
+    sufficient.articulationEstimator.historyHorizon =
+        0.40 + 2.0 * sufficient.mpc.sampleTime;
+    session.configure(sufficient);
 }
 
 // Closing the loop on an estimate that reads low forces the plant to overshoot:

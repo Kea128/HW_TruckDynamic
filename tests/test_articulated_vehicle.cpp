@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -706,28 +707,31 @@ void testDynamicObservabilityRank() {
         std::abs(plant.a[2][0]) > 1.0e-3,
         "a31 must be well clear of zero for the reduced model to be observable");
 
-    std::vector<double> h{0.0, 0.0, 1.0, 1.0};
+    // H = [0, 0, 1] reads the articulation only. Stack H, HA, HA^2.
+    std::vector<double> h{0.0, 0.0, 1.0};
     std::vector<std::vector<double>> rows;
     rows.push_back(h);
-    for (int power = 0; power < 3; ++power) {
-        std::vector<double> next(4, 0.0);
-        for (std::size_t column = 0; column < 4; ++column) {
-            for (std::size_t k = 0; k < 4; ++k) {
+    for (int power = 0; power < 2; ++power) {
+        std::vector<double> next(3, 0.0);
+        for (std::size_t column = 0; column < 3; ++column) {
+            for (std::size_t k = 0; k < 3; ++k) {
                 next[column] += h[k] * a[k][column];
             }
         }
         rows.push_back(next);
         h = next;
     }
-    // The frozen lidar bias column is unobservable by construction; the three
-    // physical states are not.
-    std::vector<std::vector<double>> physical;
-    for (const auto& row : rows) {
-        physical.push_back({row[0], row[1], row[2]});
-    }
     require(
-        observabilityRank(physical, 1.0e-9) == 3,
-        "reduced K27 model must be observable in its physical states");
+        observabilityRank(rows, 1.0e-9) == 3,
+        "reduced K27 model must be observable in its three states");
+
+    // det O = -a31, the only route by which the lidar reaches vy1.
+    const double determinant =
+        rows[0][0] * (rows[1][1] * rows[2][2] - rows[1][2] * rows[2][1]) -
+        rows[0][1] * (rows[1][0] * rows[2][2] - rows[1][2] * rows[2][0]) +
+        rows[0][2] * (rows[1][0] * rows[2][1] - rows[1][1] * rows[2][0]);
+    expectNear(
+        determinant, -a[1][0], "observability determinant must equal -a31");
 }
 
 // Successive delayed scans must each be fused at their own stamp, and a stamp
@@ -776,6 +780,10 @@ void testDelayedScanOrdering() {
         estimator.updateLidar(repeat).outcome ==
             truck_model::MeasurementOutcome::duplicate,
         "the same stamp twice must be reported as a duplicate");
+    expectNear(
+        estimator.estimate().articulation,
+        corrected,
+        "a rejected duplicate must not move the estimate either");
 }
 
 void testMeasurementBoundaryHandling() {
@@ -819,6 +827,133 @@ void testMeasurementBoundaryHandling() {
         estimator.updateLidar(good).outcome ==
             truck_model::MeasurementOutcome::duplicate,
         "replaying the same identifier must be refused");
+}
+
+// A corrupt packet must be reported, not thrown: unwinding out of a control
+// loop is worse than dropping one scan. It also has to leave the state alone.
+void testNonFiniteMeasurementIsReportedNotThrown() {
+    const auto p = parameters();
+    truck_model::ArticulationEstimator estimator(p);
+    estimator.reset(0.0, 0.05);
+    for (int step = 1; step <= 10; ++step) {
+        truck_model::ArticulationInputs inputs;
+        inputs.time = 0.05 * static_cast<double>(step);
+        inputs.truckYawRate = 0.04;
+        inputs.speed = 11.0;
+        estimator.predict(inputs);
+    }
+    // Land a real update first, so the diagnostics below are genuinely
+    // non-zero and the clearing has something to clear.
+    truck_model::ArticulationLidarMeasurement good;
+    good.stamp = 0.35;
+    good.articulation = 0.08;
+    const auto accepted = estimator.updateLidar(good);
+    require(accepted.measurementAccepted, "setup scan must be accepted");
+    require(
+        accepted.innovationCovariance > 0.0 && accepted.alignedStamp > 0.0,
+        "setup scan must leave non-zero diagnostics behind");
+
+    const double before = estimator.estimate().articulation;
+
+    for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity()}) {
+        truck_model::ArticulationLidarMeasurement corrupt;
+        corrupt.stamp = 0.40;
+        corrupt.articulation = bad;
+        const auto report = estimator.updateLidar(corrupt);
+        require(
+            report.outcome == truck_model::MeasurementOutcome::nonFinite,
+            "a non-finite articulation must report nonFinite");
+
+        truck_model::ArticulationLidarMeasurement badStamp;
+        badStamp.stamp = bad;
+        badStamp.articulation = 0.05;
+        require(
+            estimator.updateLidar(badStamp).outcome ==
+                truck_model::MeasurementOutcome::nonFinite,
+            "a non-finite stamp must report nonFinite");
+    }
+    expectNear(
+        estimator.estimate().articulation,
+        before,
+        "a rejected non-finite packet must not move the estimate");
+
+    // The outcome must not be published next to the previous packet's
+    // innovation, or a corrupt frame reads as a healthy update in the log.
+    const auto& stale = estimator.estimate();
+    require(
+        stale.innovation == 0.0 && stale.innovationCovariance == 0.0 &&
+            stale.mahalanobis == 0.0 && stale.alignedStamp == 0.0 &&
+            stale.repropagatedFrames == 0 && stale.kalmanGainPhi == 0.0 &&
+            stale.kalmanGainTrailerBias == 0.0,
+        "a rejected packet must not carry the previous packet's diagnostics");
+}
+
+// Steering reaches the dynamic state and both models' yaw residual, so a
+// non-finite value has to be caught at the door like the other inputs.
+void testNonFiniteInputsAreRejected() {
+    const auto p = parameters();
+    for (const double bad : {std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity()}) {
+        for (int field = 0; field < 4; ++field) {
+            truck_model::ArticulationEstimator estimator(p);
+            estimator.reset(0.0, 0.0);
+            truck_model::ArticulationInputs inputs;
+            inputs.time = 0.05;
+            inputs.truckYawRate = 0.03;
+            inputs.speed = 10.0;
+            inputs.steering = 0.02;
+            switch (field) {
+                case 0: inputs.time = bad; break;
+                case 1: inputs.truckYawRate = bad; break;
+                case 2: inputs.speed = bad; break;
+                default: inputs.steering = bad; break;
+            }
+            bool rejected = false;
+            try {
+                estimator.predict(inputs);
+            } catch (const std::invalid_argument&) {
+                rejected = true;
+            }
+            require(
+                rejected, "every non-finite predict input must be rejected");
+        }
+    }
+}
+
+// The replay span from the corrected frame to now carries no measurement, so
+// it must be inflated when it is long enough to count as coasting. Only the
+// replay differs between the two runs below: the frames before the update are
+// younger than either lostTimeout, and everything after it is recomputed.
+void testReplaySpanIsCoastedWhenItExceedsLostTimeout() {
+    const auto p = parameters();
+    const auto run = [&p](double lostTimeout) {
+        truck_model::ArticulationEstimatorConfig config;
+        config.historyHorizon = 1.5;   // deliberately longer than lostTimeout
+        config.lostTimeout = lostTimeout;
+        truck_model::ArticulationEstimator estimator(p, config);
+        estimator.reset(0.0, 0.0);
+        for (int step = 1; step <= 24; ++step) {
+            truck_model::ArticulationInputs inputs;
+            inputs.time = 0.05 * static_cast<double>(step);
+            inputs.truckYawRate = 0.05;
+            inputs.speed = 12.0;
+            estimator.predict(inputs);
+        }
+        truck_model::ArticulationLidarMeasurement late;
+        late.stamp = 0.25;
+        late.articulation = 0.02;
+        const auto report = estimator.updateLidar(late);
+        require(report.measurementAccepted, "late scan must be accepted");
+        return report.covariancePhi;
+    };
+
+    const double coasted = run(0.3);     // replay crosses the threshold
+    const double steady = run(10.0);     // replay never counts as coasting
+    require(
+        coasted > steady * 1.05,
+        "a replay span longer than lostTimeout must inflate the covariance");
 }
 
 // Scans that fall between input samples must be fused at their own stamp.
@@ -1104,6 +1239,9 @@ int main() {
     testDynamicObservabilityRank();
     testDelayedScanOrdering();
     testMeasurementBoundaryHandling();
+    testNonFiniteMeasurementIsReportedNotThrown();
+    testNonFiniteInputsAreRejected();
+    testReplaySpanIsCoastedWhenItExceedsLostTimeout();
     testSubFrameAlignmentIsExact();
     testDynamicModelImprovesRateTracking();
     testDynamicModelSurvivesParameterMismatch();

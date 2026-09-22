@@ -50,8 +50,10 @@ enum class MeasurementOutcome {
 }
 
 struct DelayedEkfLimits {
-    // Must exceed the largest expected scan latency plus one control period,
-    // otherwise late packets fall outside the replay window and are discarded.
+    // At least the largest scan age the filter can actually see, plus one
+    // control period; otherwise late packets fall outside the replay window
+    // and are discarded. Note that the visible age is the reported stamp's
+    // age, which equals the true latency only when the stamp is trustworthy.
     double historyHorizon{0.55};
     double mahalanobisGate{9.0};
     int consecutiveRejectLimit{3};
@@ -375,9 +377,12 @@ private:
                     frames_[i + 1].covariance,
                     frames_[i + 1].inputs,
                     dt,
-                    // The corrected trajectory is no longer open loop, so the
-                    // coasting inflation does not apply to the replay.
-                    1.0);
+                    // The span from the corrected frame to now carries no
+                    // further measurement, so it is still open loop. The
+                    // update has already moved lastAcceptedStamp_ to the scan
+                    // instant, so this measures age since the correction,
+                    // which is exactly the right clock for the replay.
+                    noiseScale(frames_[i].time));
             }
             ++touched;
         }

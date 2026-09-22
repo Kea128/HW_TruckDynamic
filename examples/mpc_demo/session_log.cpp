@@ -160,7 +160,7 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "ekf.historyHorizon", ekf.historyHorizon);
     writeKey(out, "ekf.measurementVariance", ekf.measurementVariance);
     // Process noise is specified as continuous power spectral density; see
-    // docs/3 section 5.
+    // docs/3 chapter 8.
     writeKey(
         out,
         "ekf.noiseDensity.articulationRate",

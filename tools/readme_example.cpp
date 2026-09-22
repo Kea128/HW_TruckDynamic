@@ -40,7 +40,8 @@ void delayedEkf() {
     const double sigma = 0.0087;
 
     truck_model::ArticulationEstimatorConfig cfg;
-    cfg.historyHorizon = 0.55;                 // > 最大雷达时延
+    // >= 可见最大扫描年龄 + 2 个控制周期（融合文档 9.6）
+    cfg.historyHorizon = 0.55;
     cfg.measurementVariance = sigma * sigma;   // 雷达噪声 rad^2
     cfg.processModel = truck_model::ArticulationProcessModel::kinematic;
     truck_model::ArticulationEstimator ekf(p, cfg);

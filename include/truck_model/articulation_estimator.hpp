@@ -61,8 +61,11 @@ struct ArticulationNoiseDensities {
 struct ArticulationEstimatorConfig {
     ArticulationProcessModel processModel{ArticulationProcessModel::kinematic};
 
-    // Must be at least the largest scan latency plus one control period, or
-    // late packets fall outside the replay window and are discarded.
+    // At least the largest scan age the filter can see, plus the worst service
+    // wait, plus the largest gap trim() may drop. On a fixed control grid that
+    // is latency + 2 periods; see docs/3 section 9.6. validationError() only
+    // checks that this is positive, because the library does not know your
+    // latency bound: the integration layer has to enforce the relation.
     double historyHorizon{0.55};
     double measurementVariance{3.046174197867086e-4};
     ArticulationNoiseDensities noiseDensity{};
@@ -108,7 +111,8 @@ struct ArticulationEstimate {
     MeasurementOutcome outcome{MeasurementOutcome::notInitialized};
     bool measurementAccepted{};
     bool measurementGated{};
-    // Running open loop: the newest fused scan is older than lostTimeout.
+    // Running open loop: either the newest fused scan is older than
+    // lostTimeout, or consecutiveRejectLimit scans in a row were refused.
     bool coasting{};
     // Link health: nothing has been fused for longer than linkTimeout of wall
     // clock. Distinct from coasting, which measures information age.

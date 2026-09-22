@@ -539,8 +539,11 @@ ArticulationEstimate ArticulationEstimator::predict(
     if (!impl_->configured) {
         throw std::logic_error("ArticulationEstimator is not configured");
     }
+    // Steering belongs in this check: the dynamic model multiplies it into the
+    // state, and both models feed it through tan() for the yaw residual, so a
+    // NaN here silently poisons the estimate rather than being caught.
     if (!std::isfinite(inputs.time) || !std::isfinite(inputs.truckYawRate) ||
-        !std::isfinite(inputs.speed)) {
+        !std::isfinite(inputs.speed) || !std::isfinite(inputs.steering)) {
         throw std::invalid_argument("estimator inputs must be finite");
     }
     if (!impl_->initialized) {
@@ -566,15 +569,31 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
     if (!impl_->configured) {
         throw std::logic_error("ArticulationEstimator is not configured");
     }
+    // Clear the per-measurement diagnostics up front. Every early return below
+    // would otherwise publish the previous packet's innovation alongside this
+    // packet's outcome, which reads as a valid update in the logs. predict()
+    // deliberately does not clear these, so the last update stays visible
+    // between scans.
     impl_->estimate.measurementAccepted = false;
     impl_->estimate.measurementGated = false;
+    impl_->estimate.innovation = 0.0;
+    impl_->estimate.innovationCovariance = 0.0;
+    impl_->estimate.mahalanobis = 0.0;
+    impl_->estimate.alignedStamp = 0.0;
+    impl_->estimate.repropagatedFrames = 0;
+    impl_->estimate.kalmanGainPhi = 0.0;
+    impl_->estimate.kalmanGainTrailerBias = 0.0;
+
     if (!impl_->initialized) {
         impl_->estimate.outcome = MeasurementOutcome::notInitialized;
         return impl_->estimate;
     }
+    // A corrupt sensor packet is a runtime event, not a programming error, so
+    // it is reported rather than thrown: a control loop must not unwind here.
     if (!std::isfinite(measurement.stamp) ||
         !std::isfinite(measurement.articulation)) {
-        throw std::invalid_argument("lidar measurement must be finite");
+        impl_->estimate.outcome = MeasurementOutcome::nonFinite;
+        return impl_->estimate;
     }
 
     ArticulationInputs inputs;

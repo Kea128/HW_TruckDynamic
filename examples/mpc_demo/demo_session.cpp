@@ -154,10 +154,18 @@ std::string DemoSettings::validationError() const {
         inputSpeedNoiseStd > 5.0) {
         errors << "inputSpeedNoiseStd must be finite and within [0, 5] m/s; ";
     }
-    // A window shorter than the worst-case latency silently discards scans.
-    if (lidarDelayMax > articulationEstimator.historyHorizon) {
-        errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
-                  "scans stay inside the replay window; ";
+    // A window shorter than the worst-case latency silently discards scans,
+    // and two control periods of headroom are needed rather than one.
+    // One covers delivery being quantised to the control grid; the other
+    // covers trim(), which stops as soon as the span fits and so leaves only
+    // historyHorizon minus one frame actually usable. Verified in
+    // tools/window_check.cpp: with asynchronous scan instants, one period of
+    // headroom still drops packets and two does not.
+    if (lidarDelayMax + 2.0 * mpc.sampleTime >
+        articulationEstimator.historyHorizon) {
+        errors << "ekf.historyHorizon must be >= lidarDelayMax plus two "
+                  "control periods so that late scans stay inside the replay "
+                  "window; ";
     }
     // The other two switches only mean something once the filter is running.
     if (mpcUsesFusedArticulation && !lidarFusionEnabled) {
@@ -1056,8 +1064,9 @@ void DemoSession::deliverDueLidar() {
     lastLidarOutcome_ = "none";
 
     // Service packets in arrival order rather than scan order. With a variable
-    // latency a later scan can arrive first, which is exactly the out-of-order
-    // case the replay has to survive; a plain FIFO would hide it.
+    // latency a later scan can arrive first, so the filter sees genuinely
+    // out-of-order stamps and refuses them; a plain FIFO would hide that case
+    // and leave the rejection path untested.
     while (true) {
         auto earliest = pendingLidar_.end();
         for (auto it = pendingLidar_.begin(); it != pendingLidar_.end(); ++it) {

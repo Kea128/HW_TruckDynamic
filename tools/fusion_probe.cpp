@@ -14,11 +14,12 @@ struct Score {
     double rawRmse{};
 };
 
-Score run(truck_model::ArticulationProcessModel model) {
+Score run(truck_model::ArticulationProcessModel model, double lidarNoiseStd) {
     auto settings = truck_demo::DemoSession::fusionComparisonSettings();
     settings.articulationEstimator.processModel = model;
     settings.shadowEstimatorEnabled = false;
     settings.mpcUsesFusedArticulation = false;
+    settings.lidarNoiseStd = lidarNoiseStd;
     settings.applyEstimatorMeasurementFromLidar();
 
     truck_demo::DemoSession session;
@@ -117,8 +118,10 @@ Amplitudes track(bool fusion,
 // model? Sweep it and watch both channels, since raising it trades phi noise
 // for phi-dot responsiveness.
 void sweepTrailerBiasDensity() {
+    // 2.56e-2 is what the OU match (F7a) actually gives for sigma_b = 0.063
+    // rad/s and tau_b = 0.31 s; it is swept so the doc can report it.
     const double values[] = {2.0e-5, 1.0e-4, 2.0e-4, 1.0e-3,
-                             5.0e-3, 1.1e-2, 5.0e-2};
+                             5.0e-3, 2.56e-2, 5.0e-2};
     std::printf("\nq_b [rad^2/s^3]   phi[deg]   phidot[deg/s]\n");
     for (const double q : values) {
         auto settings = truck_demo::DemoSession::fusionComparisonSettings();
@@ -163,14 +166,23 @@ void sweepTrailerBiasDensity() {
 }  // namespace
 
 int main() {
-    const auto kin = run(truck_model::ArticulationProcessModel::kinematic);
-    const auto dyn = run(truck_model::ArticulationProcessModel::dynamic);
-    std::printf("model        phi[deg]  phidot[deg/s]\n");
-    std::printf("kinematic    %8.3f  %13.3f\n", kin.phiRmse * kDeg,
-                kin.rateRmse * kDeg);
-    std::printf("dynamic      %8.3f  %13.3f\n", dyn.phiRmse * kDeg,
-                dyn.rateRmse * kDeg);
-    std::printf("raw lidar    %8.3f  %13s\n", kin.rawRmse * kDeg, "n/a");
+    // 0.5 deg is the demo's nominal scan; 4 deg is what the README quotes for
+    // real perception. Both are reported so docs/3 cannot show only the
+    // flattering one.
+    for (const double noiseDegrees : {0.5, 2.0, 4.0}) {
+        const double sigma = noiseDegrees / kDeg;
+        const auto k = run(truck_model::ArticulationProcessModel::kinematic,
+                           sigma);
+        const auto d = run(truck_model::ArticulationProcessModel::dynamic,
+                           sigma);
+        std::printf("\nlidar noise %.1f deg\n", noiseDegrees);
+        std::printf("model        phi[deg]  phidot[deg/s]\n");
+        std::printf("kinematic    %8.3f  %13.3f\n", k.phiRmse * kDeg,
+                    k.rateRmse * kDeg);
+        std::printf("dynamic      %8.3f  %13.3f\n", d.phiRmse * kDeg,
+                    d.rateRmse * kDeg);
+        std::printf("raw lidar    %8.3f  %13s\n", k.rawRmse * kDeg, "n/a");
+    }
 
     using PM = truck_model::ArticulationProcessModel;
     const auto truth = track(false, false, PM::kinematic);

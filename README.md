@@ -95,16 +95,18 @@ b 和 c 都依赖 a，a 关闭时会自动置灰。
 3. 时延：工程值 **最小 0.1 / 最大 0.4** s（面板允许最大 0.5 s）
 4. 雷达噪声按感知标定填（仿真常用 3°–4°）
 5. 勾选 **R 跟随雷达噪声**
-6. **历史窗必须不小于最大时延**：默认已是 **0.55 s**，面板可调。
-   设小于 `lidarDelayMax` 时会在应用参数时直接报错，不会静默丢包
+6. **历史窗必须不小于最大时延加两个控制周期**：默认已是 **0.55 s**，面板可调。
+   一个周期给投递量化，另一个给 `trim()`（它一发现跨度合规就停，最后那次弹出会
+   砍掉整整一帧）。小于 `lidarDelayMax + 2 * mpc.sampleTime` 时会在应用参数时
+   直接报错，不会静默丢包
 7. 应用参数后 **重置**，再运行
 8. 此时 b 是关的，控制器仍用 Plant 真值 —— 这是**评估滤波质量**的正确姿势：
    估计曲线该贴住 Plant，雷达该明显滞后，而且控制器不会对估计误差作出反应
 9. 确认精度达标后再打开 **b**，观察估计进回路的效果
 
 比较两个过程模型时打开 **c**，在「c 过程模型」里选另一个
-（见[融合文档](docs/3_articulation_fusion_filter.md)第 3 章的取舍表、第 5 章的
-动力学推导、第 12 章的开关语义）。
+（见[融合文档](docs/3_articulation_fusion_filter.md)第 4 章的取舍表、第 6 章的
+动力学推导、第 13 章的开关语义）。
 
 > **自检**：a 和 c 选**同一**过程模型时，两条估计曲线必须完全重合。
 > 不重合说明接线有问题。
@@ -122,7 +124,8 @@ b 关闭时 MPC 吃的是 Plant 真值，滤波结果只进遥测和日志。
 接受率要用 `lidar_*_count` 逐包计数列，不要用布尔列 —— 一个控制拍可能处理多包，
 布尔列描述不了。`ekf_r2`、`ekf_r2_kin`、`ekf_b_r2` 三列恒满足
 \(\hat r_2=r_{2,\text{kin}}+\hat b_{r2}\)，可当日志自检
-（列的含义见融合文档 4.5.2）。开了 c 时还会多出对照滤波器的列。
+（列的含义见融合文档 5.5.2，注意 `ekf_P_br2` 的语义随过程模型而变）。
+`shadow_*` 那几列表头始终存在；c 关闭时它们只是与主滤波器同值，不是缺列。
 该目录是运行产物，不要提交 git。
 
 ### 铰接角参考（可选）
@@ -134,7 +137,7 @@ b 关闭时 MPC 吃的是 Plant 真值，滤波结果只进遥测和日志。
 Plant 的真实超调：运动学模型的估计只读到真值的 0.866，控制器把估计压到参考，
 真实铰接角就被抬到参考的 \(1/0.866=1.156\) 倍。b 关闭时同一滤波器的偏差不变，
 但 Plant 完全不超调（0.992）。也就是说这个实验测的是"估计器偏差 × 控制器增益"，
-不是估计精度。验收要用 b 关闭的开环配置（融合文档 13.2）。路径跟踪不受影响。
+不是估计精度。验收要用 b 关闭的开环配置（融合文档 14.2）。路径跟踪不受影响。
 
 ## 库用法
 
@@ -168,10 +171,11 @@ const auto step = mpc.update(xc, curvaturePreview);     // 转角 rad
 #include "truck_model/articulation_estimator.hpp"
 
 truck_model::ArticulationEstimatorConfig cfg;
-cfg.historyHorizon = 0.55;                 // > 最大雷达时延
+// >= 滤波器可见的最大扫描年龄 + 2 个控制周期（融合文档 9.6）
+cfg.historyHorizon = 0.55;
 cfg.measurementVariance = sigma * sigma;   // 雷达噪声 rad²
 // 默认 kinematic：只需轴距，不受载重影响。载荷参数可信时可换 dynamic，
-// 它的 phiDot 明显更准，代价是对 m2/I2/C2r 敏感（融合文档第 3、5 章）。
+// 它的 phiDot 明显更准，代价是对 m2/I2/C2r 敏感（融合文档第 4、6 章）。
 cfg.processModel = truck_model::ArticulationProcessModel::kinematic;
 truck_model::ArticulationEstimator ekf(p, cfg);
 ekf.reset(t0, phi0);
@@ -191,7 +195,15 @@ const auto& e = ekf.estimate();
 // e.articulation, e.articulationRate  → 写入 MPC 的 xc[4], xc[5]
 ```
 
-几何 \(a_2,b_2,b_1,d_1\) 必须与实车一致。\(R\) 必须与雷达噪声同量级。
+几何 \(a_2,b_2,b_1,d_1\) 必须与实车一致。\(R\) 必须与**实际量测误差**同量级 ——
+注意是实际误差而不是传感器噪声，两者在下面这种情况下差很多。
+
+> **移植第一件事：确认你拿不拿得到可信的逐帧扫描时间戳。**
+> 拿得到，上面的代码直接可用；拿不到（只知道时延大致范围），就得用
+> `stamp = 到达时刻 - 标称时延` 合成，此时残余定时误差会成为主导误差源，
+> 且必须把 \(R\) 按 \(\dot\phi^2\sigma_\varepsilon^2\) 膨胀，否则转弯时扫描会被
+> 马氏门限批量误拒。这一项本库**未实现**，见融合文档第 9.7 节。
+
 完整公式、门限、coasting、移植清单：[`docs/3_articulation_fusion_filter.md`](docs/3_articulation_fusion_filter.md)。
 
 ## 默认演示车型
