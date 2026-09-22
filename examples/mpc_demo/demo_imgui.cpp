@@ -371,12 +371,20 @@ private:
             degrees(session_.currentArticulationReference().value));
         ImGui::SameLine();
         if (session_.settings().lidarFusionEnabled) {
+            const auto& active = session_.settings();
+            std::string status = u8"| 融合 ";
+            status += truck_demo::processModelName(
+                active.articulationEstimator.processModel);
+            status += u8" | MPC 输入 ";
+            status +=
+                active.mpcUsesFusedArticulation ? u8"估计值" : u8"Plant 真值";
+            if (active.shadowEstimatorEnabled) {
+                status += u8" | 对照 ";
+                status +=
+                    truck_demo::processModelName(active.shadowProcessModel);
+            }
             ImGui::TextColored(
-                ImVec4(0.35f, 0.78f, 1.0f, 1.0f),
-                u8"| 融合 %s%s",
-                truck_demo::processModelName(
-                    session_.settings().articulationEstimator.processModel),
-                session_.settings().shadowEstimatorEnabled ? u8" +对照" : "");
+                ImVec4(0.35f, 0.78f, 1.0f, 1.0f), "%s", status.c_str());
         } else {
             ImGui::TextDisabled(u8"| 融合关闭");
         }
@@ -584,10 +592,28 @@ private:
                                           : 0)) {
             parameterTableBegin("lidar_fusion");
             booleanProperty(
-                u8"启用 Delayed EKF",
+                u8"a 启用融合滤波",
                 draft_.lidarFusionEnabled);
             processModelProperty(
-                u8"过程模型", draft_.articulationEstimator.processModel);
+                u8"    a 过程模型",
+                draft_.articulationEstimator.processModel);
+            // b and c only mean something while the filter runs, and the
+            // config validator rejects them on their own, so clear them here
+            // rather than letting the user build a state that cannot apply.
+            if (!draft_.lidarFusionEnabled) {
+                draft_.mpcUsesFusedArticulation = false;
+                draft_.shadowEstimatorEnabled = false;
+            }
+            ImGui::BeginDisabled(!draft_.lidarFusionEnabled);
+            booleanProperty(
+                u8"b MPC 使用融合结果",
+                draft_.mpcUsesFusedArticulation);
+            booleanProperty(
+                u8"c 启用对照估计器",
+                draft_.shadowEstimatorEnabled);
+            processModelProperty(
+                u8"    c 过程模型", draft_.shadowProcessModel);
+            ImGui::EndDisabled();
             property(u8"雷达周期 [s]", draft_.lidarPeriod, 0.01, "%.3f");
             property(u8"最小时延 [s]", draft_.lidarDelayMin, 0.01, "%.3f");
             property(u8"最大时延 [s]", draft_.lidarDelayMax, 0.01, "%.3f");
@@ -621,11 +647,14 @@ private:
                 "%.3f");
             ImGui::EndTable();
             ImGui::TextDisabled(
+                u8"a 打开滤波器，b 决定控制器吃估计值还是 Plant 真值，\n"
+                u8"c 是不进回路的对照滤波器。a 与 c 选同一过程模型时，\n"
+                u8"两条估计曲线必然重合——不重合就是接线有问题。\n"
                 u8"R 为量测方差 (σ°)²。Q 为连续功率谱密度的平方根，\n"
                 u8"不是每拍方差；离散化按实际步长积分。改后点应用。");
         }
-        if (ImGui::CollapsingHeader(u8"传感器与影子模型")) {
-            parameterTableBegin("sensors_shadow");
+        if (ImGui::CollapsingHeader(u8"输入传感器噪声")) {
+            parameterTableBegin("input_sensors");
             double yawNoiseDegrees = degrees(draft_.inputYawRateNoiseStd);
             property(u8"横摆率噪声 [deg/s]", yawNoiseDegrees, 0.05, "%.3f");
             draft_.inputYawRateNoiseStd = radians(yawNoiseDegrees);
@@ -634,17 +663,9 @@ private:
                 draft_.inputSpeedNoiseStd,
                 0.05,
                 "%.3f");
-            booleanProperty(
-                u8"用 Plant 真值初始化",
-                draft_.initializeEstimatorFromTruth);
-            booleanProperty(
-                u8"启用对照估计器",
-                draft_.shadowEstimatorEnabled);
-            processModelProperty(
-                u8"对照过程模型", draft_.shadowProcessModel);
             ImGui::EndTable();
             ImGui::TextDisabled(
-                u8"对照估计器吃同样的数据但不进控制回路，只用来比较两种过程模型。");
+                u8"r1 与 U 经这两个噪声进入过程模型，两个滤波器吃同一份带噪输入。");
         }
 
         ImGui::Spacing();

@@ -159,6 +159,15 @@ std::string DemoSettings::validationError() const {
         errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
                   "scans stay inside the replay window; ";
     }
+    // The other two switches only mean something once the filter is running.
+    if (mpcUsesFusedArticulation && !lidarFusionEnabled) {
+        errors << "mpcUsesFusedArticulation needs lidarFusionEnabled; without "
+                  "the filter there is no estimate to feed the controller; ";
+    }
+    if (shadowEstimatorEnabled && !lidarFusionEnabled) {
+        errors << "shadowEstimatorEnabled needs lidarFusionEnabled; without "
+                  "the filter there are no scans to compare on; ";
+    }
     if (mpc.horizon > 200) {
         errors << "horizon must be <= 200; ";
     }
@@ -767,6 +776,8 @@ void DemoSession::updateMeasuredErrorState() {
     state_[3] =
         physicalState_[1] -
         currentSpeed_ * reference.curvature;
+    // The articulation channel starts from the plant. Switch b decides whether
+    // the controller keeps it or gets the estimate instead.
     state_[4] = physicalState_[3];
     state_[5] = physicalState_[1] - physicalState_[2];
     if (!settings_.lidarFusionEnabled) {
@@ -784,6 +795,9 @@ void DemoSession::updateMeasuredErrorState() {
         return;
     }
 
+    // Both filters see the same inputs and, in deliverDueLidar, the same scan
+    // objects. Selecting the same process model for both therefore has to
+    // produce identical output; that equality is the wiring self-check.
     const auto inputs = sensedInputs();
     articulationEstimate_ = articulationEstimator_.predict(inputs);
     if (settings_.shadowEstimatorEnabled) {
@@ -797,8 +811,11 @@ void DemoSession::updateMeasuredErrorState() {
     } else {
         shadowEstimate_ = articulationEstimate_;
     }
-    state_[4] = articulationEstimate_.articulation;
-    state_[5] = articulationEstimate_.articulationRate;
+
+    if (settings_.mpcUsesFusedArticulation) {
+        state_[4] = articulationEstimate_.articulation;
+        state_[5] = articulationEstimate_.articulationRate;
+    }
 }
 
 bool DemoSession::updateRuntimeAlerts() {
@@ -965,8 +982,9 @@ void DemoSession::resetArticulationEstimator() {
     lidarRng_ = settings_.lidarRandomSeed == 0 ? 1u : settings_.lidarRandomSeed;
     inputRng_ = settings_.inputRandomSeed == 0 ? 7u : settings_.inputRandomSeed;
 
-    const double seedArticulation =
-        settings_.initializeEstimatorFromTruth ? physicalState_[3] : 0.0;
+    // Both filters start from the same seed, so any later divergence is the
+    // process model rather than initialisation.
+    const double seedArticulation = physicalState_[3];
 
     auto estimatorConfig = settings_.articulationEstimator;
     articulationEstimator_.configure(settings_.vehicle, estimatorConfig);

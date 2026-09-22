@@ -15,7 +15,19 @@ struct DemoSettings {
     ArticulationReferenceConfig articulationReference{};
     truck_model::ArticulationEstimatorConfig articulationEstimator{};
     bool articulationTrackingExperiment{false};
+
+    // Switch a: run the fusion filter. The process model it uses is
+    // articulationEstimator.processModel.
     bool lidarFusionEnabled{false};
+
+    // Switch b: feed the controller the estimate instead of the plant
+    // articulation. Off by default so enabling fusion first shows filter
+    // quality on its own; the filter keeps running either way, so the estimate
+    // is still plotted and logged. Turning this on closes the loop, which is
+    // what a real vehicle does but which also lets an estimator bias steer the
+    // plant away from the reference.
+    bool mpcUsesFusedArticulation{false};
+
     double lidarPeriod{0.1};
     double lidarDelayMin{0.1};
     double lidarDelayMax{0.3};
@@ -30,13 +42,10 @@ struct DemoSettings {
     double inputSpeedNoiseStd{0.0};
     unsigned inputRandomSeed{7};
 
-    // Seed the filter with the plant articulation. A vehicle without an encoder
-    // cannot do this, but it keeps the default demo free of a startup transient
-    // that has nothing to do with the filter being compared.
-    bool initializeEstimatorFromTruth{true};
-
-    // Second estimator fed exactly the same scans, for comparing the two
-    // process models. It never reaches the controller.
+    // Switch c: a second filter fed exactly the same scans and inputs as the
+    // primary one, so the two process models can be compared on identical
+    // data. It never reaches the controller. Requires lidarFusionEnabled,
+    // since without it there are no scans to compare on.
     bool shadowEstimatorEnabled{false};
     truck_model::ArticulationProcessModel shadowProcessModel{
         truck_model::ArticulationProcessModel::dynamic};

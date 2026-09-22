@@ -146,8 +146,8 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "inputRandomSeed", static_cast<int>(settings.inputRandomSeed));
     writeKey(
         out,
-        "initializeEstimatorFromTruth",
-        settings.initializeEstimatorFromTruth);
+        "mpcUsesFusedArticulation",
+        settings.mpcUsesFusedArticulation);
     writeKey(out, "shadowEstimatorEnabled", settings.shadowEstimatorEnabled);
     writeKey(
         out,

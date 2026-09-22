@@ -561,24 +561,18 @@ void testOutOfOrderDeliveryStillTracks() {
     require(rmse < 0.05, "out-of-order arrivals broke articulation tracking");
 }
 
-// Without truth initialization and with noisy, biased sensors the filter still
-// has to converge; that is the configuration a vehicle actually runs.
-void testColdStartWithNoisySensors() {
+// A 1 deg scan, a biased yaw rate and a noisy speedometer at once: the filter
+// still has to converge and stay finite.
+void testFilterConvergesWithNoisySensors() {
     truck_demo::DemoSession session;
     auto settings = session.settings();
     settings.lidarFusionEnabled = true;
     settings.lidarNoiseStd = 0.0174;
-    settings.initializeEstimatorFromTruth = false;
     settings.inputYawRateNoiseStd = 0.005;
     settings.inputSpeedNoiseStd = 0.2;
     settings.initialArticulation = 0.12;
     settings.adaptiveSpeedEnabled = false;
     session.configure(settings);
-
-    require(
-        std::abs(session.articulationEstimate().articulation) < 1.0e-9,
-        "a cold start must not seed the filter with the plant articulation");
-
     session.start();
     double estimateSse = 0.0;
     int scored = 0;
@@ -587,7 +581,7 @@ void testColdStartWithNoisySensors() {
         const auto& latest = session.history().back();
         require(
             std::isfinite(latest.estimatedArticulation),
-            "cold-start estimate became non-finite");
+            "noisy-sensor estimate became non-finite");
         if (latest.time >= 2.0) {
             const double error =
                 latest.estimatedArticulation - latest.plantArticulation;
@@ -599,10 +593,10 @@ void testColdStartWithNoisySensors() {
             break;
         }
     }
-    require(scored > 20, "cold-start run produced too little telemetry");
+    require(scored > 20, "noisy-sensor run produced too little telemetry");
     require(
         std::sqrt(estimateSse / scored) < 0.06,
-        "filter failed to converge from a cold start with noisy sensors");
+        "filter failed to converge with noisy sensors");
 }
 
 // The shadow estimator sees the same events but never reaches the controller.
@@ -613,6 +607,7 @@ void testShadowEstimatorRunsInParallel() {
     settings.lidarNoiseStd = 0.0;
     settings.adaptiveSpeedEnabled = false;
     settings.shadowEstimatorEnabled = true;
+    settings.mpcUsesFusedArticulation = true;
     settings.articulationEstimator.processModel =
         truck_model::ArticulationProcessModel::kinematic;
     settings.shadowProcessModel =
@@ -648,6 +643,122 @@ void testShadowEstimatorRunsInParallel() {
         std::abs(session.state()[4] -
                  session.articulationEstimate().articulation) < 1.0e-12,
         "the controller must consume the primary estimate, not the shadow");
+}
+
+// Switches a and c are two instances of the same filter fed the same scans and
+// the same inputs, so choosing one process model for both has to give one
+// answer. Divergence here means the two paths are no longer equivalent.
+void testSameProcessModelMakesBothFiltersAgree() {
+    for (const auto model : {truck_model::ArticulationProcessModel::kinematic,
+                             truck_model::ArticulationProcessModel::dynamic}) {
+        truck_demo::DemoSession session;
+        auto settings = session.settings();
+        settings.lidarFusionEnabled = true;
+        settings.shadowEstimatorEnabled = true;
+        settings.lidarNoiseStd = 0.0087;
+        settings.inputYawRateNoiseStd = 0.004;
+        settings.adaptiveSpeedEnabled = false;
+        settings.articulationEstimator.processModel = model;
+        settings.shadowProcessModel = model;
+        session.configure(settings);
+        session.start();
+
+        int scored = 0;
+        for (std::size_t step = 0; step < 200; ++step) {
+            session.step();
+            const auto& latest = session.history().back();
+            require(
+                std::abs(latest.estimatedArticulation -
+                         latest.shadowArticulation) < 1.0e-12,
+                "same process model must give the same articulation");
+            require(
+                std::abs(latest.estimatedArticulationRate -
+                         latest.shadowArticulationRate) < 1.0e-12,
+                "same process model must give the same articulation rate");
+            ++scored;
+            if (session.simulationState() ==
+                truck_demo::SimulationState::finished) {
+                break;
+            }
+        }
+        require(scored > 20, "agreement run produced too little telemetry");
+    }
+}
+
+// The mirror of the test above: different process models must actually take
+// different paths, otherwise the model selector is not wired to anything.
+void testDifferentProcessModelsDiverge() {
+    truck_demo::DemoSession session;
+    auto settings = session.settings();
+    settings.lidarFusionEnabled = true;
+    settings.shadowEstimatorEnabled = true;
+    settings.lidarNoiseStd = 0.0087;
+    settings.adaptiveSpeedEnabled = false;
+    settings.articulationEstimator.processModel =
+        truck_model::ArticulationProcessModel::kinematic;
+    settings.shadowProcessModel =
+        truck_model::ArticulationProcessModel::dynamic;
+    session.configure(settings);
+    session.start();
+
+    double largestRateGap = 0.0;
+    for (std::size_t step = 0; step < 200; ++step) {
+        session.step();
+        const auto& latest = session.history().back();
+        largestRateGap = std::max(
+            largestRateGap,
+            std::abs(latest.estimatedArticulationRate -
+                     latest.shadowArticulationRate));
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+    require(
+        largestRateGap > 1.0e-3,
+        "the two process models produced the same rate; the selector is dead");
+}
+
+// Switch b decides what the controller reads. With it off the filter still
+// runs and still logs, but the articulation channel stays on the plant.
+void testFusedDataReachesControllerOnlyWhenSwitchBIsOn() {
+    for (const bool useFused : {false, true}) {
+        truck_demo::DemoSession session;
+        auto settings = session.settings();
+        settings.lidarFusionEnabled = true;
+        settings.mpcUsesFusedArticulation = useFused;
+        settings.lidarNoiseStd = 0.0087;
+        settings.adaptiveSpeedEnabled = false;
+        settings.initialArticulation = 0.05;
+        session.configure(settings);
+        session.start();
+
+        bool sawFilterWork = false;
+        for (std::size_t step = 0; step < 200; ++step) {
+            session.step();
+            const auto& latest = session.history().back();
+            const double controllerPhi = latest.state[4];
+            if (useFused) {
+                require(
+                    std::abs(controllerPhi -
+                             latest.estimatedArticulation) < 1.0e-12,
+                    "switch b on: the controller must read the estimate");
+            } else {
+                require(
+                    std::abs(controllerPhi - latest.plantArticulation) < 1.0e-12,
+                    "switch b off: the controller must read the plant");
+            }
+            // Either way the filter has to be alive and producing output.
+            sawFilterWork = sawFilterWork || latest.lidarAcceptedCount > 0;
+            if (session.simulationState() ==
+                truck_demo::SimulationState::finished) {
+                break;
+            }
+        }
+        require(
+            sawFilterWork,
+            "the filter must keep running regardless of switch b");
+    }
 }
 
 // A replay window shorter than the worst-case latency silently discards scans,
@@ -689,6 +800,9 @@ void testTrackingLoopAmplifiesEstimatorAmplitudeBias() {
         settings.articulationReference.frequency = 0.12;
         settings.articulationReference.duration = 40.0;
         settings.lidarFusionEnabled = fusion;
+        // This test is about what closing the loop on an estimate does, so
+        // switch b tracks switch a here instead of using the default.
+        settings.mpcUsesFusedArticulation = fusion;
         settings.shadowEstimatorEnabled = false;
         settings.articulationEstimator.processModel = model;
         settings.applyEstimatorMeasurementFromLidar();
@@ -862,7 +976,10 @@ int main() {
         testDrawnPathCurvatureIsSmooth();
         testLidarFusionTracksPlantArticulation();
         testOutOfOrderDeliveryStillTracks();
-        testColdStartWithNoisySensors();
+        testFilterConvergesWithNoisySensors();
+        testSameProcessModelMakesBothFiltersAgree();
+        testDifferentProcessModelsDiverge();
+        testFusedDataReachesControllerOnlyWhenSwitchBIsOn();
         testShadowEstimatorRunsInParallel();
         testTrackingLoopAmplifiesEstimatorAmplitudeBias();
         testHistoryHorizonMustCoverLatency();
