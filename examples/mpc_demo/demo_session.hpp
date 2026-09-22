@@ -57,6 +57,10 @@ struct Telemetry {
     double plantArticulationRate{};
     double estimatedArticulation{};
     double estimatedArticulationRate{};
+    double shadowArticulation{};
+    double shadowArticulationRate{};
+    double measuredTruckYawRate{};
+    double measuredSpeed{};
     double lidarArticulation{};
     double lidarStamp{};
     double lidarDelay{};
@@ -64,8 +68,16 @@ struct Telemetry {
     bool lidarDelivered{};
     bool lidarAccepted{};
     bool lidarGated{};
+    // Per-step packet counters. A control step can service several scans, so a
+    // single boolean cannot describe the step.
+    std::size_t lidarDeliveredCount{};
+    std::size_t lidarAcceptedCount{};
+    std::size_t lidarGatedCount{};
+    std::size_t lidarDroppedCount{};
+    const char* lidarOutcome{"none"};
     bool estimatorCoasting{};
     truck_model::ArticulationEstimate estimator{};
+    truck_model::ArticulationEstimate shadowEstimator{};
     std::vector<truck_model::Vector<6>> predictedStates{};
     bool warningActive{};
     std::string warning;
@@ -113,6 +125,8 @@ public:
     [[nodiscard]] ArticulationSample currentArticulationReference() const;
     [[nodiscard]] const truck_model::ArticulationEstimate&
     articulationEstimate() const noexcept;
+    [[nodiscard]] const truck_model::ArticulationEstimate&
+    shadowArticulationEstimate() const noexcept;
     [[nodiscard]] const truck_model::ErrorLinearModel&
     errorModel() const noexcept;
     [[nodiscard]] const truck_model::DiscreteDynamicModel&
@@ -149,6 +163,8 @@ private:
     void deliverDueLidar();
     [[nodiscard]] double nextLidarUniform();
     [[nodiscard]] double nextLidarNormal();
+    [[nodiscard]] double nextInputNormal();
+    [[nodiscard]] truck_model::ArticulationInputs sensedInputs();
     [[nodiscard]] bool updateRuntimeAlerts();
     void record();
 
@@ -184,13 +200,26 @@ private:
     std::string faultReason_;
     std::string warningReason_;
     truck_model::ArticulationEstimator articulationEstimator_;
+    truck_model::ArticulationEstimator shadowEstimator_;
     truck_model::ArticulationEstimate articulationEstimate_{};
+    truck_model::ArticulationEstimate shadowEstimate_{};
     struct PendingLidar {
         double deliverTime{};
         truck_model::ArticulationLidarMeasurement measurement{};
     };
-    std::deque<PendingLidar> pendingLidar_;
+    // Not a FIFO: packets are serviced in arrival-time order, so a short-delay
+    // scan can overtake an earlier one and reach the filter out of stamp order.
+    std::vector<PendingLidar> pendingLidar_;
     std::uint32_t lidarRng_{1};
+    std::uint32_t inputRng_{7};
+    std::uint64_t nextLidarId_{1};
+    std::size_t lastLidarDeliveredCount_{};
+    std::size_t lastLidarAcceptedCount_{};
+    std::size_t lastLidarGatedCount_{};
+    std::size_t lastLidarDroppedCount_{};
+    const char* lastLidarOutcome_{"none"};
+    double measuredYawRate_{};
+    double measuredSpeed_{};
     double lastLidarScanTime_{-1.0};
     double lastLidarArticulation_{};
     double lastLidarStamp_{};

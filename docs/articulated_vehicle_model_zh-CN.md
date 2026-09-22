@@ -261,8 +261,6 @@ I_{z2}\dot r_2&=-b_2F_{2r}-a_2H.
 
 ### 4.1 铰接点速度约束的逐步推导
 
-![铰接点速度投影与约束](images/hitch_velocity_constraint.svg)
-
 同一个物理铰接点不能在卡车和拖车的描述中拥有两种速度。先在卡车坐标系计算：
 铰接点位于 \(O_1\) 后方，位置向量为
 
@@ -565,7 +563,7 @@ g^Tq+U\phi=g^TRz+U\phi\equiv0.
 
 ### 7.1 步骤 1：误差状态与物理状态转换
 
-![路径跟踪误差定义](images/path_tracking_errors.svg)
+![路径跟踪误差定义](images/path_error_geometry.svg)
 
 令 \(e_y\) 是卡车质心相对参考路径的左向横向误差，
 \(e_\Phi=\theta_1-\theta_{\mathrm{ref}}\)，参考曲率为 \(\kappa\)。这里采用

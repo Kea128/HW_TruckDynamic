@@ -8,6 +8,9 @@
 
 namespace truck_model {
 
+// curvatureRate is the time derivative dRho/dt [1/(m*s)], not the arc-length
+// derivative dKappa/ds [1/m^2] stored in ReferencePathPoint. Convert with
+// dRho/dt = speed * dKappa/ds; see docs/1 section 1.4.4.
 struct CurvatureSample {
     double curvature{};
     double curvatureRate{};

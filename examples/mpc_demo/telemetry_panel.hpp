@@ -56,6 +56,7 @@ private:
     std::vector<double> articulationReference_;
     std::vector<double> articulationRate_;
     std::vector<double> plantArticulation_;
+    std::vector<double> shadowArticulation_;
     std::vector<double> lidarArticulation_;
     std::vector<double> articulationTrackingError_;
     std::vector<double> truckYawRate_;

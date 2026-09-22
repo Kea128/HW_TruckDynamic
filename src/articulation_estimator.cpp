@@ -1,5 +1,7 @@
 #include "truck_model/articulation_estimator.hpp"
 
+#include "truck_model/matrix_exponential.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -17,62 +19,15 @@ void requireValid(const Parameters& parameters) {
     }
 }
 
+// Folds an angle into (-pi, pi]. The upper bound is inclusive so that the
+// representation is unique; a bare pair of while loops would leave -pi and +pi
+// both reachable.
 double wrapAngle(double angle) {
-    while (angle > kPi) {
-        angle -= 2.0 * kPi;
+    if (!std::isfinite(angle)) {
+        return angle;
     }
-    while (angle < -kPi) {
-        angle += 2.0 * kPi;
-    }
-    return angle;
-}
-
-Vector<3> add(const Vector<3>& left, const Vector<3>& right) {
-    return {left[0] + right[0], left[1] + right[1], left[2] + right[2]};
-}
-
-Vector<3> scale(const Vector<3>& value, double factor) {
-    return {value[0] * factor, value[1] * factor, value[2] * factor};
-}
-
-Matrix<3, 3> identity3() {
-    Matrix<3, 3> result{};
-    result[0][0] = 1.0;
-    result[1][1] = 1.0;
-    result[2][2] = 1.0;
-    return result;
-}
-
-Matrix<3, 3> multiply(const Matrix<3, 3>& left, const Matrix<3, 3>& right) {
-    Matrix<3, 3> result{};
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
-            for (std::size_t inner = 0; inner < 3; ++inner) {
-                result[row][column] += left[row][inner] * right[inner][column];
-            }
-        }
-    }
-    return result;
-}
-
-Matrix<3, 3> transpose(const Matrix<3, 3>& matrix) {
-    Matrix<3, 3> result{};
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
-            result[row][column] = matrix[column][row];
-        }
-    }
-    return result;
-}
-
-Matrix<3, 3> add(const Matrix<3, 3>& left, const Matrix<3, 3>& right) {
-    Matrix<3, 3> result{};
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
-            result[row][column] = left[row][column] + right[row][column];
-        }
-    }
-    return result;
+    const double shifted = std::remainder(angle, 2.0 * kPi);
+    return shifted <= -kPi ? shifted + 2.0 * kPi : shifted;
 }
 
 double trailerLength(const Parameters& parameters) {
@@ -83,165 +38,69 @@ double hitchOffset(const Parameters& parameters) {
     return parameters.b1 - parameters.d1;
 }
 
-double trailerYawRateFromState(
-    const Parameters& parameters,
-    const ArticulationInputs& inputs,
-    const Vector<3>& state) {
-    return kinematicTrailerYawRate(
-               parameters,
-               inputs.speed,
-               inputs.truckYawRate,
-               state[0]) +
-           state[1];
+void requirePositive(
+    std::ostringstream& errors,
+    double value,
+    const char* name) {
+    if (!(value > 0.0) || !std::isfinite(value)) {
+        errors << name << " must be finite and > 0; ";
+    }
 }
 
-double trailerYawSensitivity(
-    const Parameters& parameters,
-    const ArticulationInputs& inputs,
-    double articulation) {
-    const double length = trailerLength(parameters);
-    return (inputs.speed * std::cos(articulation) -
-            hitchOffset(parameters) * inputs.truckYawRate *
-                std::sin(articulation)) /
-           length;
-}
-
-struct Propagated {
-    Vector<3> state{};
-    Matrix<3, 3> covariance{};
-};
-
-Propagated propagate(
-    const Parameters& parameters,
-    const ArticulationEstimatorConfig& config,
-    const Vector<3>& state,
-    const Matrix<3, 3>& covariance,
-    const ArticulationInputs& inputs,
-    double dt,
-    bool coasting) {
-    Propagated result;
-    if (!(dt > 0.0)) {
-        result.state = state;
-        result.state[0] = wrapAngle(result.state[0]);
-        result.covariance = covariance;
-        return result;
+void requireNonnegative(
+    std::ostringstream& errors,
+    double value,
+    const char* name) {
+    if (value < 0.0 || !std::isfinite(value)) {
+        errors << name << " must be finite and >= 0; ";
     }
-
-    const double r2 = trailerYawRateFromState(parameters, inputs, state);
-    result.state[0] = wrapAngle(state[0] + dt * (inputs.truckYawRate - r2));
-    result.state[1] = state[1];
-    result.state[2] = state[2];
-
-    Matrix<3, 3> jacobian = identity3();
-    jacobian[0][0] = 1.0 - dt * trailerYawSensitivity(
-                                    parameters, inputs, state[0]);
-    jacobian[0][1] = -dt;
-
-    const double length = trailerLength(parameters);
-    const double offset = hitchOffset(parameters);
-    const double dPhiDr1 = 1.0 - offset * std::cos(state[0]) / length;
-    const double dPhiDu = -std::sin(state[0]) / length;
-    const double extraPhiVariance =
-        dt * dt *
-        (dPhiDr1 * dPhiDr1 * config.truckYawRateVariance +
-         dPhiDu * dPhiDu * config.speedVariance);
-    const double coastInflation = coasting ? 4.0 : 1.0;
-
-    Matrix<3, 3> processNoise{};
-    processNoise[0][0] =
-        coastInflation * config.processArticulationRateVariance * dt +
-        extraPhiVariance;
-    processNoise[1][1] = config.processTrailerYawBiasVariance * dt;
-    processNoise[2][2] = config.processLidarBiasVariance * dt;
-
-    result.covariance = add(
-        multiply(multiply(jacobian, covariance), transpose(jacobian)),
-        processNoise);
-    return result;
-}
-
-void applyLidarUpdate(
-    Vector<3>& state,
-    Matrix<3, 3>& covariance,
-    double measurement,
-    double measurementVariance,
-    double& innovation,
-    double& innovationCovariance,
-    Vector<3>& gain) {
-    const double predicted = wrapAngle(state[0] + state[2]);
-    innovation = wrapAngle(measurement - predicted);
-    innovationCovariance =
-        covariance[0][0] + covariance[0][2] + covariance[2][0] +
-        covariance[2][2] + measurementVariance;
-    if (!(innovationCovariance > 0.0) || !std::isfinite(innovationCovariance)) {
-        throw std::runtime_error("articulation innovation covariance is invalid");
-    }
-
-    gain = {
-        (covariance[0][0] + covariance[0][2]) / innovationCovariance,
-        (covariance[1][0] + covariance[1][2]) / innovationCovariance,
-        (covariance[2][0] + covariance[2][2]) / innovationCovariance};
-    state = add(state, scale(gain, innovation));
-    state[0] = wrapAngle(state[0]);
-
-    Matrix<3, 3> kalmanH{};
-    kalmanH[0][0] = gain[0];
-    kalmanH[1][0] = gain[1];
-    kalmanH[2][0] = gain[2];
-    kalmanH[0][2] = gain[0];
-    kalmanH[1][2] = gain[1];
-    kalmanH[2][2] = gain[2];
-    Matrix<3, 3> iMinusKh = identity3();
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
-            iMinusKh[row][column] -= kalmanH[row][column];
-        }
-    }
-    Matrix<3, 3> krk{};
-    for (std::size_t row = 0; row < 3; ++row) {
-        for (std::size_t column = 0; column < 3; ++column) {
-            krk[row][column] = gain[row] * measurementVariance * gain[column];
-        }
-    }
-    covariance = add(
-        multiply(multiply(iMinusKh, covariance), transpose(iMinusKh)),
-        krk);
 }
 
 }  // namespace
 
+std::string ArticulationNoiseDensities::validationError() const {
+    std::ostringstream errors;
+    requirePositive(errors, articulationRate, "noiseDensity.articulationRate");
+    requireNonnegative(errors, trailerYawBias, "noiseDensity.trailerYawBias");
+    requireNonnegative(errors, lidarBias, "noiseDensity.lidarBias");
+    requireNonnegative(errors, truckYawRate, "noiseDensity.truckYawRate");
+    requireNonnegative(errors, speed, "noiseDensity.speed");
+    requireNonnegative(
+        errors, truckLateralVelocity, "noiseDensity.truckLateralVelocity");
+    requireNonnegative(errors, trailerYawRate, "noiseDensity.trailerYawRate");
+    return errors.str();
+}
+
 std::string ArticulationEstimatorConfig::validationError() const {
     std::ostringstream errors;
-    const auto requirePositive = [&errors](double value, const char* name) {
-        if (!(value > 0.0) || !std::isfinite(value)) {
-            errors << name << " must be finite and > 0; ";
-        }
-    };
-    const auto requireNonnegative =
-        [&errors](double value, const char* name) {
-            if (value < 0.0 || !std::isfinite(value)) {
-                errors << name << " must be finite and >= 0; ";
-            }
-        };
-    requirePositive(historyHorizon, "historyHorizon");
-    requirePositive(measurementVariance, "measurementVariance");
+    requirePositive(errors, historyHorizon, "historyHorizon");
+    requirePositive(errors, measurementVariance, "measurementVariance");
+    requirePositive(errors, mahalanobisGate, "mahalanobisGate");
+    requirePositive(errors, lostTimeout, "lostTimeout");
+    requirePositive(errors, linkTimeout, "linkTimeout");
     requirePositive(
-        processArticulationRateVariance, "processArticulationRateVariance");
-    requireNonnegative(
-        processTrailerYawBiasVariance, "processTrailerYawBiasVariance");
-    requireNonnegative(processLidarBiasVariance, "processLidarBiasVariance");
-    requireNonnegative(truckYawRateVariance, "truckYawRateVariance");
-    requireNonnegative(speedVariance, "speedVariance");
-    requirePositive(mahalanobisGate, "mahalanobisGate");
-    requirePositive(lostTimeout, "lostTimeout");
+        errors, initialArticulationVariance, "initialArticulationVariance");
     requirePositive(
-        initialArticulationVariance, "initialArticulationVariance");
+        errors,
+        initialTrailerYawBiasVariance,
+        "initialTrailerYawBiasVariance");
     requirePositive(
-        initialTrailerYawBiasVariance, "initialTrailerYawBiasVariance");
-    requirePositive(initialLidarBiasVariance, "initialLidarBiasVariance");
+        errors, initialLidarBiasVariance, "initialLidarBiasVariance");
+    requirePositive(
+        errors,
+        initialTruckLateralVelocityVariance,
+        "initialTruckLateralVelocityVariance");
+    requirePositive(
+        errors, initialTrailerYawRateVariance, "initialTrailerYawRateVariance");
+    requirePositive(errors, modelRefreshSpeedStep, "modelRefreshSpeedStep");
+    requirePositive(errors, minimumModelSpeed, "minimumModelSpeed");
+    if (!std::isfinite(lidarBiasCalibration)) {
+        errors << "lidarBiasCalibration must be finite; ";
+    }
     if (consecutiveRejectLimit < 1) {
         errors << "consecutiveRejectLimit must be >= 1; ";
     }
+    errors << noiseDensity.validationError();
     return errors.str();
 }
 
@@ -257,9 +116,395 @@ double kinematicTrailerYawRate(
            length;
 }
 
+// ---------------------------------------------------------------------------
+// Kinematic (K5) process model
+// ---------------------------------------------------------------------------
+
+KinematicArticulationModel::KinematicArticulationModel(
+    Parameters parameters,
+    ArticulationEstimatorConfig config)
+    : parameters_(std::move(parameters)), config_(std::move(config)) {}
+
+Matrix<3, 3> KinematicArticulationModel::continuousJacobian(
+    const Vector<3>& state,
+    const Inputs& inputs) const {
+    const double length = trailerLength(parameters_);
+    const double offset = hitchOffset(parameters_);
+    // d(r2_kin)/d(phi)
+    const double sensitivity =
+        (inputs.speed * std::cos(state[0]) -
+         offset * inputs.truckYawRate * std::sin(state[0])) /
+        length;
+    Matrix<3, 3> jacobian{};
+    jacobian[0][0] = -sensitivity;
+    jacobian[0][1] = -1.0;
+    return jacobian;
+}
+
+void KinematicArticulationModel::propagate(
+    Vector<3>& state,
+    Matrix<3, 3>& covariance,
+    const Inputs& inputs,
+    double dt,
+    double processNoiseScale) const {
+    if (!(dt > 0.0)) {
+        normalize(state);
+        return;
+    }
+
+    const double length = trailerLength(parameters_);
+    const double offset = hitchOffset(parameters_);
+    const double trailerRate =
+        kinematicTrailerYawRate(
+            parameters_, inputs.speed, inputs.truckYawRate, state[0]) +
+        state[1];
+
+    const auto continuous = continuousJacobian(state, inputs);
+
+    // Sensitivity of phiDot to the measured inputs.
+    const double rateSensitivity = 1.0 - offset * std::cos(state[0]) / length;
+    const double speedSensitivity = -std::sin(state[0]) / length;
+
+    const auto& density = config_.noiseDensity;
+    Matrix<3, 3> continuousNoise{};
+    continuousNoise[0][0] =
+        processNoiseScale * density.articulationRate +
+        rateSensitivity * rateSensitivity * density.truckYawRate +
+        speedSensitivity * speedSensitivity * density.speed;
+    continuousNoise[1][1] = density.trailerYawBias;
+    continuousNoise[2][2] = config_.estimateLidarBias ? density.lidarBias : 0.0;
+
+    // Euler mean; the transition below is the exact Jacobian of that map.
+    state[0] = wrapAngle(state[0] + dt * (inputs.truckYawRate - trailerRate));
+
+    Matrix<3, 3> transition = identityMatrix<3>();
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
+            transition[row][column] += dt * continuous[row][column];
+        }
+    }
+
+    Matrix<3, 3> discreteNoise{};
+    if (config_.compatibility.diagonalEulerProcessNoise) {
+        discreteNoise[0][0] =
+            processNoiseScale * density.articulationRate * dt +
+            dt * dt *
+                (rateSensitivity * rateSensitivity * density.truckYawRate +
+                 speedSensitivity * speedSensitivity * density.speed);
+        discreteNoise[1][1] = density.trailerYawBias * dt;
+        discreteNoise[2][2] = continuousNoise[2][2] * dt;
+    } else {
+        discreteNoise =
+            discretizeVanLoan(continuous, continuousNoise, dt).processNoise;
+    }
+
+    const auto left = matrixProduct(transition, covariance);
+    covariance = matrixProduct(left, transposed(transition));
+    for (std::size_t row = 0; row < 3; ++row) {
+        for (std::size_t column = 0; column < 3; ++column) {
+            covariance[row][column] += discreteNoise[row][column];
+        }
+    }
+}
+
+double KinematicArticulationModel::predictMeasurement(
+    const Vector<3>& state) const {
+    return wrapAngle(state[0] + state[2]);
+}
+
+Vector<3> KinematicArticulationModel::measurementJacobian(
+    const Vector<3>&) const {
+    return {1.0, 0.0, 1.0};
+}
+
+double KinematicArticulationModel::measurementVariance() const {
+    return config_.measurementVariance;
+}
+
+double KinematicArticulationModel::residual(
+    double measurement,
+    double predicted) const {
+    return wrapAngle(measurement - predicted);
+}
+
+void KinematicArticulationModel::normalize(Vector<3>& state) const {
+    state[0] = wrapAngle(state[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic reduced-(K27) process model
+// ---------------------------------------------------------------------------
+
+DynamicArticulationModel::DynamicArticulationModel(
+    Parameters parameters,
+    ArticulationEstimatorConfig config)
+    : parameters_(std::move(parameters)), config_(std::move(config)) {}
+
+void DynamicArticulationModel::refresh(double speed) const {
+    const double scheduled = std::max(speed, config_.minimumModelSpeed);
+    if (scheduledSpeed_ > 0.0 &&
+        std::abs(scheduled - scheduledSpeed_) < config_.modelRefreshSpeedStep) {
+        return;
+    }
+
+    Parameters scheduledParameters = parameters_;
+    scheduledParameters.vx = scheduled;
+    const auto plant = buildDynamicModel(scheduledParameters);
+
+    // Rows 0 and 2 of the (K27) matrix are vy1Dot and r2Dot; row 1 (r1Dot) is
+    // dropped because the truck yaw rate is measured and enters as an input.
+    continuous_ = Matrix<4, 4>{};
+    continuous_[0][0] = plant.a[0][0];
+    continuous_[0][1] = plant.a[0][2];
+    continuous_[0][2] = plant.a[0][3];
+    continuous_[1][0] = plant.a[2][0];
+    continuous_[1][1] = plant.a[2][2];
+    continuous_[1][2] = plant.a[2][3];
+    continuous_[2][1] = -1.0;
+
+    inputYawRate_ = {plant.a[0][1], plant.a[2][1], 1.0, 0.0};
+    inputSteering_ = {plant.b[0], plant.b[2], 0.0, 0.0};
+    scheduledSpeed_ = scheduled;
+}
+
+Matrix<4, 4> DynamicArticulationModel::continuousJacobian(double speed) const {
+    refresh(speed);
+    return continuous_;
+}
+
+void DynamicArticulationModel::propagate(
+    Vector<4>& state,
+    Matrix<4, 4>& covariance,
+    const Inputs& inputs,
+    double dt,
+    double processNoiseScale) const {
+    if (!(dt > 0.0)) {
+        normalize(state);
+        return;
+    }
+    refresh(inputs.speed);
+
+    // Exact zero-order hold: the model is linear once the speed is scheduled,
+    // so the mean uses an augmented matrix exponential rather than Euler.
+    Matrix<6, 6> generator{};
+    for (std::size_t row = 0; row < 4; ++row) {
+        for (std::size_t column = 0; column < 4; ++column) {
+            generator[row][column] = continuous_[row][column] * dt;
+        }
+        generator[row][4] = inputYawRate_[row] * dt;
+        generator[row][5] = inputSteering_[row] * dt;
+    }
+    const auto expanded = matrixExponential(generator);
+
+    Matrix<4, 4> transition{};
+    Vector<4> yawRateGain{};
+    Vector<4> steeringGain{};
+    for (std::size_t row = 0; row < 4; ++row) {
+        for (std::size_t column = 0; column < 4; ++column) {
+            transition[row][column] = expanded[row][column];
+        }
+        yawRateGain[row] = expanded[row][4];
+        steeringGain[row] = expanded[row][5];
+    }
+
+    Vector<4> next{};
+    for (std::size_t row = 0; row < 4; ++row) {
+        double accumulated = yawRateGain[row] * inputs.truckYawRate +
+                             steeringGain[row] * inputs.steering;
+        for (std::size_t column = 0; column < 4; ++column) {
+            accumulated += transition[row][column] * state[column];
+        }
+        next[row] = accumulated;
+    }
+    state = next;
+    normalize(state);
+
+    const auto& density = config_.noiseDensity;
+    Matrix<4, 4> continuousNoise{};
+    continuousNoise[0][0] = density.truckLateralVelocity;
+    continuousNoise[1][1] = density.trailerYawRate;
+    continuousNoise[2][2] = processNoiseScale * density.articulationRate;
+    continuousNoise[3][3] = config_.estimateLidarBias ? density.lidarBias : 0.0;
+    // Truck yaw-rate sensor noise enters through the same column as the input.
+    for (std::size_t row = 0; row < 4; ++row) {
+        for (std::size_t column = 0; column < 4; ++column) {
+            continuousNoise[row][column] +=
+                inputYawRate_[row] * density.truckYawRate * inputYawRate_[column];
+        }
+    }
+
+    Matrix<4, 4> discreteNoise{};
+    if (config_.compatibility.diagonalEulerProcessNoise) {
+        for (std::size_t i = 0; i < 4; ++i) {
+            discreteNoise[i][i] = continuousNoise[i][i] * dt;
+        }
+    } else {
+        discreteNoise =
+            discretizeVanLoan(continuous_, continuousNoise, dt).processNoise;
+    }
+
+    const auto left = matrixProduct(transition, covariance);
+    covariance = matrixProduct(left, transposed(transition));
+    for (std::size_t row = 0; row < 4; ++row) {
+        for (std::size_t column = 0; column < 4; ++column) {
+            covariance[row][column] += discreteNoise[row][column];
+        }
+    }
+}
+
+double DynamicArticulationModel::predictMeasurement(
+    const Vector<4>& state) const {
+    return wrapAngle(state[2] + state[3]);
+}
+
+Vector<4> DynamicArticulationModel::measurementJacobian(
+    const Vector<4>&) const {
+    return {0.0, 0.0, 1.0, 1.0};
+}
+
+double DynamicArticulationModel::measurementVariance() const {
+    return config_.measurementVariance;
+}
+
+double DynamicArticulationModel::residual(
+    double measurement,
+    double predicted) const {
+    return wrapAngle(measurement - predicted);
+}
+
+void DynamicArticulationModel::normalize(Vector<4>& state) const {
+    state[2] = wrapAngle(state[2]);
+}
+
+// ---------------------------------------------------------------------------
+// Facade
+// ---------------------------------------------------------------------------
+
+struct ArticulationEstimator::Impl {
+    Parameters parameters{};
+    ArticulationEstimatorConfig config{};
+    bool configured{false};
+    bool initialized{false};
+    DelayedEkf<KinematicArticulationModel> kinematic;
+    DelayedEkf<DynamicArticulationModel> dynamic;
+    ArticulationEstimate estimate{};
+    std::uint64_t nextIdentifier{1};
+    double lastAcceptedArrival{0.0};
+    bool everAcceptedArrival{false};
+    double resetTime{0.0};
+
+    [[nodiscard]] bool useDynamic() const {
+        return config.processModel == ArticulationProcessModel::dynamic;
+    }
+
+    [[nodiscard]] DelayedEkfLimits limits() const {
+        DelayedEkfLimits value;
+        value.historyHorizon = config.historyHorizon;
+        value.mahalanobisGate = config.mahalanobisGate;
+        value.consecutiveRejectLimit = config.consecutiveRejectLimit;
+        value.lostTimeout = config.lostTimeout;
+        return value;
+    }
+
+    void publish(const ArticulationInputs& inputs, double time) {
+        const double length = parameters.a2 + parameters.b2;
+        (void)length;
+        double articulation = 0.0;
+        double trailerRate = 0.0;
+        double trailerBias = 0.0;
+        double lidarBias = 0.0;
+        double lateralVelocity = 0.0;
+        double variancePhi = 0.0;
+        double varianceTrailer = 0.0;
+        double varianceLidar = 0.0;
+        double informationAge = 0.0;
+        double lastAccepted = 0.0;
+        int rejects = 0;
+        std::size_t historySize = 0;
+        bool coasting = false;
+
+        const double kinematicRate = kinematicTrailerYawRate(
+            parameters,
+            inputs.speed,
+            inputs.truckYawRate,
+            useDynamic() ? dynamic.state()[2] : kinematic.state()[0]);
+
+        if (useDynamic()) {
+            const auto& state = dynamic.state();
+            const auto& covariance = dynamic.covariance();
+            lateralVelocity = state[0];
+            trailerRate = state[1];
+            articulation = state[2];
+            lidarBias = state[3];
+            trailerBias = trailerRate - kinematicRate;
+            variancePhi = covariance[2][2];
+            varianceTrailer = covariance[1][1];
+            varianceLidar = covariance[3][3];
+            informationAge = dynamic.informationAge();
+            lastAccepted = dynamic.lastAcceptedStamp();
+            rejects = dynamic.consecutiveRejects();
+            historySize = dynamic.timelineSize();
+            coasting = dynamic.coasting();
+        } else {
+            const auto& state = kinematic.state();
+            const auto& covariance = kinematic.covariance();
+            articulation = state[0];
+            trailerBias = state[1];
+            lidarBias = state[2];
+            trailerRate = kinematicRate + trailerBias;
+            variancePhi = covariance[0][0];
+            varianceTrailer = covariance[1][1];
+            varianceLidar = covariance[2][2];
+            informationAge = kinematic.informationAge();
+            lastAccepted = kinematic.lastAcceptedStamp();
+            rejects = kinematic.consecutiveRejects();
+            historySize = kinematic.timelineSize();
+            coasting = kinematic.coasting();
+        }
+
+        const double wheelbase = parameters.a1 + parameters.b1;
+        const double bicycleYaw =
+            wheelbase > 0.0
+                ? inputs.speed * std::tan(inputs.steering) / wheelbase
+                : 0.0;
+
+        estimate.time = time;
+        estimate.articulation = articulation;
+        estimate.trailerYawRate = trailerRate;
+        estimate.kinematicTrailerYawRate = kinematicRate;
+        estimate.articulationRate = inputs.truckYawRate - trailerRate;
+        estimate.trailerYawBias = trailerBias;
+        estimate.lidarBias = lidarBias;
+        estimate.truckLateralVelocity = lateralVelocity;
+        estimate.truckYawResidual = inputs.truckYawRate - bicycleYaw;
+        estimate.covariancePhi = variancePhi;
+        estimate.covarianceTrailerBias = varianceTrailer;
+        estimate.covarianceLidarBias = varianceLidar;
+        estimate.informationAge = informationAge;
+        estimate.lastAcceptedStamp = lastAccepted;
+        estimate.consecutiveRejects = rejects;
+        estimate.historySize = historySize;
+        estimate.coasting = coasting;
+        estimate.arrivalGap =
+            everAcceptedArrival ? time - lastAcceptedArrival : time - resetTime;
+        estimate.linkStalled = estimate.arrivalGap > config.linkTimeout;
+    }
+};
+
+ArticulationEstimator::ArticulationEstimator() : impl_(std::make_unique<Impl>()) {}
+
+ArticulationEstimator::~ArticulationEstimator() = default;
+
+ArticulationEstimator::ArticulationEstimator(
+    ArticulationEstimator&&) noexcept = default;
+
+ArticulationEstimator& ArticulationEstimator::operator=(
+    ArticulationEstimator&&) noexcept = default;
+
 ArticulationEstimator::ArticulationEstimator(
     Parameters parameters,
-    ArticulationEstimatorConfig config) {
+    ArticulationEstimatorConfig config)
+    : impl_(std::make_unique<Impl>()) {
     configure(std::move(parameters), std::move(config));
 }
 
@@ -271,262 +516,212 @@ void ArticulationEstimator::configure(
     if (!error.empty()) {
         throw std::invalid_argument(error);
     }
-    parameters_ = std::move(parameters);
-    config_ = std::move(config);
-    configured_ = true;
-    initialized_ = false;
-    history_.clear();
-    estimate_ = {};
+
+    impl_->parameters = std::move(parameters);
+    impl_->config = std::move(config);
+    impl_->configured = true;
+    impl_->initialized = false;
+    impl_->estimate = {};
+    impl_->nextIdentifier = 1;
+    impl_->everAcceptedArrival = false;
+
+    if (impl_->useDynamic()) {
+        impl_->dynamic.configure(
+            DynamicArticulationModel(impl_->parameters, impl_->config),
+            impl_->limits());
+    } else {
+        impl_->kinematic.configure(
+            KinematicArticulationModel(impl_->parameters, impl_->config),
+            impl_->limits());
+    }
 }
 
 void ArticulationEstimator::reset(double time, double articulation) {
-    requireConfigured();
+    if (!impl_->configured) {
+        throw std::logic_error("ArticulationEstimator is not configured");
+    }
     if (!std::isfinite(time) || !std::isfinite(articulation)) {
         throw std::invalid_argument(
             "estimator reset time and articulation must be finite");
     }
-    Vector<3> state{wrapAngle(articulation), 0.0, 0.0};
-    Matrix<3, 3> covariance{};
-    covariance[0][0] = config_.initialArticulationVariance;
-    covariance[1][1] = config_.initialTrailerYawBiasVariance;
-    covariance[2][2] = config_.initialLidarBiasVariance;
-    history_.clear();
-    history_.push_back({time, state, covariance, {time, 0.0, 0.0, 0.0}});
-    initialized_ = true;
-    estimate_ = {};
-    estimate_.lastAcceptedStamp = time;
-    publishFromState(time, state, covariance, history_.back().inputs);
+
+    const auto& config = impl_->config;
+    ArticulationInputs inputs;
+    inputs.time = time;
+
+    if (impl_->useDynamic()) {
+        Vector<4> state{0.0, 0.0, wrapAngle(articulation),
+                        config.lidarBiasCalibration};
+        Matrix<4, 4> covariance{};
+        covariance[0][0] = config.initialTruckLateralVelocityVariance;
+        covariance[1][1] = config.initialTrailerYawRateVariance;
+        covariance[2][2] = config.initialArticulationVariance;
+        covariance[3][3] =
+            config.estimateLidarBias ? config.initialLidarBiasVariance : 0.0;
+        impl_->dynamic.reset(time, state, covariance, inputs);
+    } else {
+        Vector<3> state{wrapAngle(articulation), 0.0,
+                        config.lidarBiasCalibration};
+        Matrix<3, 3> covariance{};
+        covariance[0][0] = config.initialArticulationVariance;
+        covariance[1][1] = config.initialTrailerYawBiasVariance;
+        covariance[2][2] =
+            config.estimateLidarBias ? config.initialLidarBiasVariance : 0.0;
+        impl_->kinematic.reset(time, state, covariance, inputs);
+    }
+
+    impl_->initialized = true;
+    impl_->resetTime = time;
+    impl_->lastAcceptedArrival = time;
+    impl_->everAcceptedArrival = false;
+    impl_->estimate = {};
+    impl_->estimate.lastAcceptedStamp = time;
+    impl_->publish(inputs, time);
 }
 
 ArticulationEstimate ArticulationEstimator::predict(
     const ArticulationInputs& inputs) {
-    requireConfigured();
-    if (!std::isfinite(inputs.time) ||
-        !std::isfinite(inputs.truckYawRate) ||
+    if (!impl_->configured) {
+        throw std::logic_error("ArticulationEstimator is not configured");
+    }
+    if (!std::isfinite(inputs.time) || !std::isfinite(inputs.truckYawRate) ||
         !std::isfinite(inputs.speed)) {
         throw std::invalid_argument("estimator inputs must be finite");
     }
-    if (!initialized_) {
+    if (!impl_->initialized) {
         reset(inputs.time, 0.0);
-        history_.back().inputs = inputs;
-        publishFromState(
-            inputs.time, history_.back().state, history_.back().covariance, inputs);
-        return estimate_;
     }
 
-    auto& latest = history_.back();
-    if (inputs.time <= latest.time + 1.0e-15) {
-        latest.inputs = inputs;
-        publishFromState(latest.time, latest.state, latest.covariance, inputs);
-        return estimate_;
+    if (impl_->useDynamic()) {
+        impl_->dynamic.predict(inputs, inputs.time);
+    } else {
+        impl_->kinematic.predict(inputs, inputs.time);
     }
 
-    const double dt = inputs.time - latest.time;
-    const auto next = propagate(
-        parameters_,
-        config_,
-        latest.state,
-        latest.covariance,
-        inputs,
-        dt,
-        estimate_.coasting);
-    history_.push_back({inputs.time, next.state, next.covariance, inputs});
-    trimHistory();
-    publishFromState(inputs.time, next.state, next.covariance, inputs);
-    return estimate_;
+    impl_->estimate.outcome = MeasurementOutcome::notInitialized;
+    impl_->estimate.measurementAccepted = false;
+    impl_->estimate.measurementGated = false;
+    impl_->estimate.replayedEntries = 0;
+    impl_->publish(inputs, inputs.time);
+    return impl_->estimate;
 }
 
 ArticulationEstimate ArticulationEstimator::updateLidar(
     const ArticulationLidarMeasurement& measurement) {
-    requireConfigured();
-    estimate_.measurementAccepted = false;
-    estimate_.measurementGated = false;
-    if (!initialized_ || history_.empty()) {
-        return estimate_;
+    if (!impl_->configured) {
+        throw std::logic_error("ArticulationEstimator is not configured");
+    }
+    impl_->estimate.measurementAccepted = false;
+    impl_->estimate.measurementGated = false;
+    if (!impl_->initialized) {
+        impl_->estimate.outcome = MeasurementOutcome::notInitialized;
+        return impl_->estimate;
     }
     if (!std::isfinite(measurement.stamp) ||
         !std::isfinite(measurement.articulation)) {
         throw std::invalid_argument("lidar measurement must be finite");
     }
 
-    const double oldest = history_.front().time;
-    const double newest = history_.back().time;
-    if (measurement.stamp < oldest - 1.0e-9 ||
-        measurement.stamp > newest + 0.05) {
-        ++estimate_.consecutiveRejects;
-        estimate_.coasting =
-            estimate_.consecutiveRejects >= config_.consecutiveRejectLimit ||
-            newest - estimate_.lastAcceptedStamp > config_.lostTimeout;
-        return estimate_;
+    double stamp = measurement.stamp;
+    if (impl_->config.compatibility.nearestFrameAlignment) {
+        stamp = impl_->useDynamic() ? impl_->dynamic.time()
+                                    : impl_->kinematic.time();
+        // The legacy path could only align to a stored frame; approximate it by
+        // snapping onto the newest one when the scan is not older than it.
+        if (measurement.stamp < stamp) {
+            const double horizon = impl_->config.historyHorizon;
+            const double oldest = stamp - horizon;
+            stamp = std::max(measurement.stamp, oldest);
+        }
     }
 
-    const std::size_t index = nearestFrame(measurement.stamp);
-    auto state = history_[index].state;
-    auto covariance = history_[index].covariance;
+    const std::uint64_t identifier =
+        measurement.id != 0 ? measurement.id : impl_->nextIdentifier++;
+
+    ArticulationInputs inputs;
+    double now = 0.0;
+    typename DelayedEkf<KinematicArticulationModel>::MeasurementReport
+        kinematicReport;
+    typename DelayedEkf<DynamicArticulationModel>::MeasurementReport
+        dynamicReport;
+
+    MeasurementOutcome outcome = MeasurementOutcome::notInitialized;
     double innovation = 0.0;
     double innovationCovariance = 0.0;
-    const double predicted = wrapAngle(state[0] + state[2]);
-    innovation = wrapAngle(measurement.articulation - predicted);
-    innovationCovariance =
-        covariance[0][0] + covariance[0][2] + covariance[2][0] +
-        covariance[2][2] + config_.measurementVariance;
-    const double mahalanobis =
-        innovation * innovation / std::max(innovationCovariance, 1.0e-18);
-    estimate_.innovation = innovation;
-    estimate_.innovationCovariance = innovationCovariance;
-    if (!(mahalanobis <= config_.mahalanobisGate)) {
-        estimate_.measurementGated = true;
-        estimate_.mahalanobis = mahalanobis;
-        estimate_.alignedStamp = history_[index].time;
-        estimate_.kalmanGainPhi = 0.0;
-        estimate_.kalmanGainTrailerBias = 0.0;
-        estimate_.kalmanGainLidarBias = 0.0;
-        ++estimate_.consecutiveRejects;
-        estimate_.coasting =
-            estimate_.consecutiveRejects >= config_.consecutiveRejectLimit ||
-            newest - estimate_.lastAcceptedStamp > config_.lostTimeout;
-        estimate_.historySize = history_.size();
-        return estimate_;
+    double mahalanobis = 0.0;
+    double alignedStamp = 0.0;
+    std::size_t replayed = 0;
+    Vector<3> kinematicGain{};
+    Vector<4> dynamicGain{};
+
+    if (impl_->useDynamic()) {
+        dynamicReport = impl_->dynamic.update(
+            stamp, measurement.articulation, identifier);
+        outcome = dynamicReport.outcome;
+        innovation = dynamicReport.innovation;
+        innovationCovariance = dynamicReport.innovationCovariance;
+        mahalanobis = dynamicReport.mahalanobis;
+        alignedStamp = dynamicReport.alignedStamp;
+        replayed = dynamicReport.replayedEntries;
+        dynamicGain = dynamicReport.gain;
+        inputs = impl_->dynamic.latestInputs();
+        now = impl_->dynamic.time();
+    } else {
+        kinematicReport = impl_->kinematic.update(
+            stamp, measurement.articulation, identifier);
+        outcome = kinematicReport.outcome;
+        innovation = kinematicReport.innovation;
+        innovationCovariance = kinematicReport.innovationCovariance;
+        mahalanobis = kinematicReport.mahalanobis;
+        alignedStamp = kinematicReport.alignedStamp;
+        replayed = kinematicReport.replayedEntries;
+        kinematicGain = kinematicReport.gain;
+        inputs = impl_->kinematic.latestInputs();
+        now = impl_->kinematic.time();
     }
 
-    Vector<3> gain{};
-    applyLidarUpdate(
-        state,
-        covariance,
-        measurement.articulation,
-        config_.measurementVariance,
-        innovation,
-        innovationCovariance,
-        gain);
-    history_[index].state = state;
-    history_[index].covariance = covariance;
-
-    for (std::size_t i = index; i + 1 < history_.size(); ++i) {
-        const double dt = history_[i + 1].time - history_[i].time;
-        const auto next = propagate(
-            parameters_,
-            config_,
-            history_[i].state,
-            history_[i].covariance,
-            history_[i + 1].inputs,
-            dt,
-            false);
-        history_[i + 1].state = next.state;
-        history_[i + 1].covariance = next.covariance;
+    if (outcome == MeasurementOutcome::accepted) {
+        impl_->lastAcceptedArrival = now;
+        impl_->everAcceptedArrival = true;
     }
 
-    estimate_.measurementAccepted = true;
-    estimate_.consecutiveRejects = 0;
-    estimate_.lastAcceptedStamp = measurement.stamp;
-    estimate_.alignedStamp = history_[index].time;
-    estimate_.coasting = false;
-    estimate_.kalmanGainPhi = gain[0];
-    estimate_.kalmanGainTrailerBias = gain[1];
-    estimate_.kalmanGainLidarBias = gain[2];
-    estimate_.mahalanobis = mahalanobis;
-    const auto& current = history_.back();
-    publishFromState(current.time, current.state, current.covariance, current.inputs);
-    estimate_.measurementAccepted = true;
-    estimate_.innovation = innovation;
-    estimate_.innovationCovariance = innovationCovariance;
-    estimate_.mahalanobis = mahalanobis;
-    estimate_.alignedStamp = history_[index].time;
-    estimate_.kalmanGainPhi = gain[0];
-    estimate_.kalmanGainTrailerBias = gain[1];
-    estimate_.kalmanGainLidarBias = gain[2];
-    return estimate_;
+    impl_->publish(inputs, now);
+    impl_->estimate.outcome = outcome;
+    impl_->estimate.measurementAccepted =
+        outcome == MeasurementOutcome::accepted;
+    impl_->estimate.measurementGated = outcome == MeasurementOutcome::gated;
+    impl_->estimate.innovation = innovation;
+    impl_->estimate.innovationCovariance = innovationCovariance;
+    impl_->estimate.mahalanobis = mahalanobis;
+    impl_->estimate.alignedStamp = alignedStamp;
+    impl_->estimate.replayedEntries = replayed;
+    if (impl_->useDynamic()) {
+        impl_->estimate.kalmanGainPhi = dynamicGain[2];
+        impl_->estimate.kalmanGainTrailerBias = dynamicGain[1];
+        impl_->estimate.kalmanGainLidarBias = dynamicGain[3];
+    } else {
+        impl_->estimate.kalmanGainPhi = kinematicGain[0];
+        impl_->estimate.kalmanGainTrailerBias = kinematicGain[1];
+        impl_->estimate.kalmanGainLidarBias = kinematicGain[2];
+    }
+    return impl_->estimate;
 }
 
-const ArticulationEstimate&
-ArticulationEstimator::estimate() const noexcept {
-    return estimate_;
+const ArticulationEstimate& ArticulationEstimator::estimate() const noexcept {
+    return impl_->estimate;
 }
 
-const ArticulationEstimatorConfig&
-ArticulationEstimator::config() const noexcept {
-    return config_;
+const ArticulationEstimatorConfig& ArticulationEstimator::config()
+    const noexcept {
+    return impl_->config;
+}
+
+const Parameters& ArticulationEstimator::parameters() const noexcept {
+    return impl_->parameters;
 }
 
 bool ArticulationEstimator::initialized() const noexcept {
-    return initialized_;
-}
-
-void ArticulationEstimator::requireConfigured() const {
-    if (!configured_) {
-        throw std::logic_error("ArticulationEstimator is not configured");
-    }
-}
-
-void ArticulationEstimator::publishFromState(
-    double time,
-    const Vector<3>& state,
-    const Matrix<3, 3>& covariance,
-    const ArticulationInputs& inputs) {
-    const int rejects = estimate_.consecutiveRejects;
-    const double lastAccepted = estimate_.lastAcceptedStamp;
-    const bool accepted = estimate_.measurementAccepted;
-    const bool gated = estimate_.measurementGated;
-    const double innovation = estimate_.innovation;
-    const double innovationCovariance = estimate_.innovationCovariance;
-    const double mahalanobis = estimate_.mahalanobis;
-    const double gainPhi = estimate_.kalmanGainPhi;
-    const double gainBias = estimate_.kalmanGainTrailerBias;
-    const double gainLidar = estimate_.kalmanGainLidarBias;
-    const double aligned = estimate_.alignedStamp;
-    estimate_.time = time;
-    estimate_.articulation = wrapAngle(state[0]);
-    estimate_.trailerYawBias = state[1];
-    estimate_.lidarBias = state[2];
-    estimate_.kinematicTrailerYawRate = kinematicTrailerYawRate(
-        parameters_, inputs.speed, inputs.truckYawRate, state[0]);
-    estimate_.trailerYawRate =
-        estimate_.kinematicTrailerYawRate + state[1];
-    estimate_.articulationRate = inputs.truckYawRate - estimate_.trailerYawRate;
-    const double wheelbase = parameters_.a1 + parameters_.b1;
-    const double bicycleYaw =
-        wheelbase > 0.0 ? inputs.speed * std::tan(inputs.steering) / wheelbase
-                        : 0.0;
-    estimate_.truckYawResidual = inputs.truckYawRate - bicycleYaw;
-    estimate_.covariance = covariance;
-    estimate_.covariancePhi = covariance[0][0];
-    estimate_.covarianceTrailerBias = covariance[1][1];
-    estimate_.covarianceLidarBias = covariance[2][2];
-    estimate_.consecutiveRejects = rejects;
-    estimate_.lastAcceptedStamp = lastAccepted;
-    estimate_.measurementAccepted = accepted;
-    estimate_.measurementGated = gated;
-    estimate_.innovation = innovation;
-    estimate_.innovationCovariance = innovationCovariance;
-    estimate_.mahalanobis = mahalanobis;
-    estimate_.kalmanGainPhi = gainPhi;
-    estimate_.kalmanGainTrailerBias = gainBias;
-    estimate_.kalmanGainLidarBias = gainLidar;
-    estimate_.alignedStamp = aligned;
-    estimate_.historySize = history_.size();
-    estimate_.coasting =
-        rejects >= config_.consecutiveRejectLimit ||
-        (initialized_ && time - lastAccepted > config_.lostTimeout);
-}
-
-void ArticulationEstimator::trimHistory() {
-    while (history_.size() > 1 &&
-           history_.back().time - history_.front().time >
-               config_.historyHorizon + 1.0e-12) {
-        history_.pop_front();
-    }
-}
-
-std::size_t ArticulationEstimator::nearestFrame(double stamp) const {
-    std::size_t best = 0;
-    double bestError = std::abs(history_.front().time - stamp);
-    for (std::size_t i = 1; i < history_.size(); ++i) {
-        const double error = std::abs(history_[i].time - stamp);
-        if (error < bestError) {
-            best = i;
-            bestError = error;
-        }
-    }
-    return best;
+    return impl_->initialized;
 }
 
 }  // namespace truck_model

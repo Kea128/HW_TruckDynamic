@@ -139,6 +139,28 @@ std::string DemoSettings::validationError() const {
         lidarNoiseStd > 0.2) {
         errors << "lidarNoiseStd must be finite and within [0, 0.2] rad; ";
     }
+    if (!std::isfinite(lidarInstallationBias) ||
+        std::abs(lidarInstallationBias) > 0.2) {
+        errors <<
+            "lidarInstallationBias must be finite and within +/-0.2 rad; ";
+    }
+    if (!std::isfinite(inputYawRateNoiseStd) || inputYawRateNoiseStd < 0.0 ||
+        inputYawRateNoiseStd > 0.5) {
+        errors <<
+            "inputYawRateNoiseStd must be finite and within [0, 0.5] rad/s; ";
+    }
+    if (!std::isfinite(inputYawRateBias) ||
+        std::abs(inputYawRateBias) > 0.5) {
+        errors << "inputYawRateBias must be finite and within +/-0.5 rad/s; ";
+    }
+    if (!std::isfinite(inputSpeedNoiseStd) || inputSpeedNoiseStd < 0.0 ||
+        inputSpeedNoiseStd > 5.0) {
+        errors << "inputSpeedNoiseStd must be finite and within [0, 5] m/s; ";
+    }
+    if (lidarDelayMax > articulationEstimator.historyHorizon) {
+        errors << "ekf.historyHorizon must be >= lidarDelayMax so that late "
+                  "scans stay inside the replay window; ";
+    }
     if (mpc.horizon > 200) {
         errors << "horizon must be <= 200; ";
     }
@@ -480,6 +502,11 @@ DemoSession::articulationEstimate() const noexcept {
     return articulationEstimate_;
 }
 
+const truck_model::ArticulationEstimate&
+DemoSession::shadowArticulationEstimate() const noexcept {
+    return shadowEstimate_;
+}
+
 const truck_model::ErrorLinearModel&
 DemoSession::errorModel() const noexcept {
     return errorModel_;
@@ -736,21 +763,28 @@ void DemoSession::updateMeasuredErrorState() {
         articulationEstimate_.articulation = state_[4];
         articulationEstimate_.articulationRate = state_[5];
         articulationEstimate_.trailerYawRate = physicalState_[2];
+        shadowEstimate_ = articulationEstimate_;
         lastLidarArticulation_ = state_[4];
         lastLidarDelay_ = 0.0;
         lastLidarAccepted_ = false;
+        measuredYawRate_ = physicalState_[1];
+        measuredSpeed_ = currentSpeed_;
         return;
     }
 
-    truck_model::ArticulationInputs inputs;
-    inputs.time = time_;
-    inputs.truckYawRate = physicalState_[1];
-    inputs.speed = currentSpeed_;
-    inputs.steering = steering_;
+    const auto inputs = sensedInputs();
     articulationEstimate_ = articulationEstimator_.predict(inputs);
+    if (settings_.shadowEstimatorEnabled) {
+        shadowEstimate_ = shadowEstimator_.predict(inputs);
+    }
     captureDelayedLidar(physicalState_[3]);
     deliverDueLidar();
     articulationEstimate_ = articulationEstimator_.estimate();
+    if (settings_.shadowEstimatorEnabled) {
+        shadowEstimate_ = shadowEstimator_.estimate();
+    } else {
+        shadowEstimate_ = articulationEstimate_;
+    }
     state_[4] = articulationEstimate_.articulation;
     state_[5] = articulationEstimate_.articulationRate;
 }
@@ -834,6 +868,10 @@ void DemoSession::record() {
     sample.plantArticulationRate = sample.plantPhiDot;
     sample.estimatedArticulation = articulationEstimate_.articulation;
     sample.estimatedArticulationRate = articulationEstimate_.articulationRate;
+    sample.shadowArticulation = shadowEstimate_.articulation;
+    sample.shadowArticulationRate = shadowEstimate_.articulationRate;
+    sample.measuredTruckYawRate = measuredYawRate_;
+    sample.measuredSpeed = measuredSpeed_;
     sample.lidarArticulation = lastLidarArticulation_;
     sample.lidarStamp = lastLidarStamp_;
     sample.lidarDelay = lastLidarDelay_;
@@ -841,8 +879,14 @@ void DemoSession::record() {
     sample.lidarDelivered = lastLidarDelivered_;
     sample.lidarAccepted = lastLidarAccepted_;
     sample.lidarGated = lastLidarGated_;
+    sample.lidarDeliveredCount = lastLidarDeliveredCount_;
+    sample.lidarAcceptedCount = lastLidarAcceptedCount_;
+    sample.lidarGatedCount = lastLidarGatedCount_;
+    sample.lidarDroppedCount = lastLidarDroppedCount_;
+    sample.lidarOutcome = lastLidarOutcome_;
     sample.estimatorCoasting = articulationEstimate_.coasting;
     sample.estimator = articulationEstimate_;
+    sample.shadowEstimator = shadowEstimate_;
     sample.predictedStates = predictedStates_;
     sample.warningActive = !warningReason_.empty();
     sample.warning = warningReason_;
@@ -893,13 +937,57 @@ void DemoSession::resetArticulationEstimator() {
     lastLidarAccepted_ = false;
     lastLidarDelivered_ = false;
     lastLidarGated_ = false;
+    lastLidarDeliveredCount_ = 0;
+    lastLidarAcceptedCount_ = 0;
+    lastLidarGatedCount_ = 0;
+    lastLidarDroppedCount_ = 0;
+    lastLidarOutcome_ = "none";
+    nextLidarId_ = 1;
     unconstrainedSteering_ = steering_;
     modelsRebuiltThisStep_ = false;
     lidarRng_ = settings_.lidarRandomSeed == 0 ? 1u : settings_.lidarRandomSeed;
+    inputRng_ = settings_.inputRandomSeed == 0 ? 7u : settings_.inputRandomSeed;
+
+    const double seedArticulation =
+        settings_.initializeEstimatorFromTruth ? physicalState_[3] : 0.0;
+
     auto estimatorConfig = settings_.articulationEstimator;
     articulationEstimator_.configure(settings_.vehicle, estimatorConfig);
-    articulationEstimator_.reset(time_, physicalState_[3]);
+    articulationEstimator_.reset(time_, seedArticulation);
     articulationEstimate_ = articulationEstimator_.estimate();
+
+    auto shadowConfig = estimatorConfig;
+    shadowConfig.processModel = settings_.shadowProcessModel;
+    shadowEstimator_.configure(settings_.vehicle, shadowConfig);
+    shadowEstimator_.reset(time_, seedArticulation);
+    shadowEstimate_ = shadowEstimator_.estimate();
+    measuredYawRate_ = physicalState_[1];
+    measuredSpeed_ = currentSpeed_;
+}
+
+double DemoSession::nextInputNormal() {
+    inputRng_ = inputRng_ * 1664525u + 1013904223u;
+    const double u1 = std::max(
+        static_cast<double>(inputRng_ >> 8) * (1.0 / 16777216.0), 1.0e-12);
+    inputRng_ = inputRng_ * 1664525u + 1013904223u;
+    const double u2 = static_cast<double>(inputRng_ >> 8) * (1.0 / 16777216.0);
+    return std::sqrt(-2.0 * std::log(u1)) * std::cos(2.0 * kPi * u2);
+}
+
+truck_model::ArticulationInputs DemoSession::sensedInputs() {
+    truck_model::ArticulationInputs inputs;
+    inputs.time = time_;
+    inputs.truckYawRate = physicalState_[1] + settings_.inputYawRateBias +
+                          settings_.inputYawRateNoiseStd * nextInputNormal();
+    inputs.speed =
+        currentSpeed_ + settings_.inputSpeedNoiseStd * nextInputNormal();
+    // A negative sensed speed would break the 1/U tyre terms in the scheduled
+    // model; clamp rather than propagate an impossible reading.
+    inputs.speed = std::max(inputs.speed, 0.1);
+    inputs.steering = steering_;
+    measuredYawRate_ = inputs.truckYawRate;
+    measuredSpeed_ = inputs.speed;
+    return inputs;
 }
 
 void DemoSession::captureDelayedLidar(double plantArticulation) {
@@ -913,8 +1001,10 @@ void DemoSession::captureDelayedLidar(double plantArticulation) {
     PendingLidar pending;
     pending.deliverTime = time_ + delay;
     pending.measurement.stamp = time_;
-    pending.measurement.articulation =
-        plantArticulation + settings_.lidarNoiseStd * nextLidarNormal();
+    pending.measurement.articulation = plantArticulation +
+                                       settings_.lidarInstallationBias +
+                                       settings_.lidarNoiseStd * nextLidarNormal();
+    pending.measurement.id = nextLidarId_++;
     pendingLidar_.push_back(pending);
     lastLidarScanTime_ = time_;
 }
@@ -923,18 +1013,56 @@ void DemoSession::deliverDueLidar() {
     lastLidarAccepted_ = false;
     lastLidarDelivered_ = false;
     lastLidarGated_ = false;
-    while (!pendingLidar_.empty() &&
-           pendingLidar_.front().deliverTime <= time_ + 1.0e-12) {
-        const auto pending = pendingLidar_.front();
-        pendingLidar_.pop_front();
+    lastLidarDeliveredCount_ = 0;
+    lastLidarAcceptedCount_ = 0;
+    lastLidarGatedCount_ = 0;
+    lastLidarDroppedCount_ = 0;
+    lastLidarOutcome_ = "none";
+
+    // Service packets in arrival order rather than scan order. With a variable
+    // latency a later scan can arrive first, which is exactly the out-of-order
+    // case the replay has to survive; a plain FIFO would hide it.
+    while (true) {
+        auto earliest = pendingLidar_.end();
+        for (auto it = pendingLidar_.begin(); it != pendingLidar_.end(); ++it) {
+            if (it->deliverTime > time_ + 1.0e-12) {
+                continue;
+            }
+            if (earliest == pendingLidar_.end() ||
+                it->deliverTime < earliest->deliverTime) {
+                earliest = it;
+            }
+        }
+        if (earliest == pendingLidar_.end()) {
+            break;
+        }
+
+        const auto pending = *earliest;
+        pendingLidar_.erase(earliest);
+
         lastLidarDelivered_ = true;
+        ++lastLidarDeliveredCount_;
         lastLidarArticulation_ = pending.measurement.articulation;
         lastLidarStamp_ = pending.measurement.stamp;
         lastLidarDelay_ = time_ - pending.measurement.stamp;
+
         articulationEstimate_ =
             articulationEstimator_.updateLidar(pending.measurement);
+        if (settings_.shadowEstimatorEnabled) {
+            shadowEstimate_ = shadowEstimator_.updateLidar(pending.measurement);
+        }
+
         lastLidarAccepted_ = articulationEstimate_.measurementAccepted;
         lastLidarGated_ = articulationEstimate_.measurementGated;
+        lastLidarOutcome_ =
+            truck_model::measurementOutcomeName(articulationEstimate_.outcome);
+        if (articulationEstimate_.measurementAccepted) {
+            ++lastLidarAcceptedCount_;
+        } else if (articulationEstimate_.measurementGated) {
+            ++lastLidarGatedCount_;
+        } else {
+            ++lastLidarDroppedCount_;
+        }
     }
 }
 

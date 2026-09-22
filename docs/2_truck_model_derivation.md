@@ -617,6 +617,38 @@ F_{H,y2}\approx-H.
 \tag{D45}
 \]
 
+这一步需要额外条件，不能只凭 "\(\phi\) 小"。展开 (D44) 的第一项：
+
+\[
+-F_{hx}\sin\phi=-F_{hx}\phi+O(\varepsilon^3),
+\]
+
+若 \(F_{hx}\) 在直线平衡点处的基值 \(F_{hx,0}\) 是 \(O(1)\)，则
+\(-F_{hx,0}\phi\) 与 \(-H\cos\phi\) 同为一阶，删除它不合法。因此 (D45) 及其后的
+(K8) 成立需要
+
+\[
+\boxed{
+F_{hx,0}=0
+\quad\text{或}\quad
+F_{hx}=O(\varepsilon).
+}
+\tag{D45a}
+\]
+
+同样的项也出现在拖车偏航方程 (D48)：铰接力臂为 \(a_2\)，漏掉的力矩为
+\(-a_2F_{hx}\phi\)。
+
+量级判断：直线匀速时 \(F_{hx}\) 只需克服拖车滚阻与气阻，
+\(m_2=18\,\mathrm t\) 时约 \(1\text{–}3\,\mathrm{kN}\)，相对
+\(10\text{–}30\,\mathrm{kN}\) 的轮胎侧向力可视为高阶小量，(D45a) 近似成立。
+但牵引/制动时不成立：\(F_{hx}=30\,\mathrm{kN}\)、\(\phi=0.05\) 时横向方程漏掉
+\(1.5\,\mathrm{kN}\)、偏航方程漏掉 \(a_2F_{hx}\phi=6\,\mathrm{kN\,m}\)
+（\(a_2=4\,\mathrm m\)）。
+
+要覆盖这些工况必须把 \(F_{hx}\) 作为显式量保留，由拖车纵向方程补一条方程，
+模型维数和输入都会增加；本文矩阵不适用。
+
 拖车横向方程：
 
 \[
@@ -1530,10 +1562,13 @@ B_p=
 ![六状态路径误差几何](images/path_error_geometry.svg)
 
 \(e_y\) 是 \(O_1\) 相对 \(\boldsymbol p_{\mathrm{ref}}\) 的左向投影；虚线为参考
-法向。纵向匹配假设 \(e_x\equiv 0\) 使 \(O_1\) 落在该法向上。
+法向。一阶纵向匹配把 \(O_1\) 视为落在该法向上。
 
-本文六状态模型明确采用纵向匹配假设 \(e_x\equiv0\)，因此不是严格最近点 Frenet
-模型。严格 Frenet 模型还会包含 \(\dot s\) 和 \(1-\rho e_y\) 等项。若曲率按弧长给出为
+本文六状态模型采用**一阶**纵向匹配，因此不是严格最近点 Frenet 模型。严格 Frenet
+模型还会包含 \(\dot s\) 和 \(1-\rho e_y\) 等项。
+
+这里的 \(e_x\) 只在一阶意义下可略，并非恒为零；第 11.1 节给出
+\(\dot e_x=U\rho e_y+O(\varepsilon^2)U\) 及其工程处理。若曲率按弧长给出为
 \(\rho(t)=\kappa(s(t))\)，并取 \(\dot s=U\)，则
 \(\dot\rho=U\kappa'(s)\)；仅在直线或固定半径圆弧上才有 \(\dot\rho=0\)。
 
@@ -1555,7 +1590,7 @@ B_p=
 \dot e_y
 &=-U\rho e_x+U\sin e_\psi+v_{y1}\cos e_\psi\\
 &=U\sin e_\psi+v_{y1}\cos e_\psi
-\qquad(e_x=0)\\
+\qquad(U\rho e_x=O(\varepsilon^2)U)\\
 &\approx v_{y1}+Ue_\psi.
 \end{aligned}
 \tag{D116}
@@ -1909,3 +1944,198 @@ A_c(6,5)=a_{24}-a_{34}.
 \]
 
 这些项描述铰接角通过拖车轮胎侧偏力反馈到整车横向动力学。
+
+---
+
+## 11. 适用边界的逐式推导
+
+本章补齐
+[`1_truck_model_key_formula.md`](1_truck_model_key_formula.md) 1.4 节列出的边界条件。
+纵向铰接力一条已在 (D45a) 就地给出，这里补其余三条。
+
+### 11.1 纵向误差 \(e_x\) 的真实动态
+
+沿用第 10.1 节的定义
+\(e_x=\boldsymbol e_{x,\mathrm{ref}}^T(\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}})\)。
+参考点按 \(\dot{\boldsymbol p}_{\mathrm{ref}}=U\boldsymbol e_{x,\mathrm{ref}}\)
+运动，参考标架随 \(\dot\theta_{\mathrm{ref}}=U\rho\) 旋转，故
+
+\[
+\dot{\boldsymbol e}_{x,\mathrm{ref}}
+=U\rho\,\boldsymbol e_{y,\mathrm{ref}}.
+\tag{D146}
+\]
+
+对 \(e_x\) 求导，逐项写出：
+
+\[
+\begin{aligned}
+\dot e_x
+&=\dot{\boldsymbol e}_{x,\mathrm{ref}}^T
+  (\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}})
+ +\boldsymbol e_{x,\mathrm{ref}}^T
+  (\boldsymbol v_{O_1}-U\boldsymbol e_{x,\mathrm{ref}})\\
+&=U\rho\,\boldsymbol e_{y,\mathrm{ref}}^T
+  (\boldsymbol p_{O_1}-\boldsymbol p_{\mathrm{ref}})
+ +\boldsymbol e_{x,\mathrm{ref}}^T\boldsymbol v_{O_1}-U.
+\end{aligned}
+\tag{D147}
+\]
+
+第一项按定义即 \(U\rho e_y\)。第二项用
+\(\boldsymbol v_{O_1}=U\boldsymbol e_{x1}+v_{y1}\boldsymbol e_{y1}\) 和
+\(\boldsymbol e_{x,\mathrm{ref}}^T\boldsymbol e_{x1}=\cos e_\psi\)、
+\(\boldsymbol e_{x,\mathrm{ref}}^T\boldsymbol e_{y1}=-\sin e_\psi\) 展开：
+
+\[
+\boldsymbol e_{x,\mathrm{ref}}^T\boldsymbol v_{O_1}
+=U\cos e_\psi-v_{y1}\sin e_\psi.
+\tag{D148}
+\]
+
+代回 (D147)：
+
+\[
+\dot e_x
+=U\rho e_y+U(\cos e_\psi-1)-v_{y1}\sin e_\psi.
+\tag{D149}
+\]
+
+按 1.3 节阶次表，\(\cos e_\psi-1=O(\varepsilon^2)\)，
+\(v_{y1}\sin e_\psi=O(\varepsilon^2)U\)，而 \(U\rho e_y\) 只是
+\(U\cdot O(\varepsilon)\cdot O(\varepsilon)L_1/L_1\)。整理得
+
+\[
+\boxed{
+\dot e_x=U\rho e_y+O(\varepsilon^2)U.
+}
+\tag{D150}
+\]
+
+**结论一：\(e_x\equiv0\) 不是不变流形。** 只要 \(\rho e_y\neq0\)，\(e_x\) 就会漂移。
+数值例：\(U=15\,\mathrm{m/s}\)、\(\rho=0.02\,\mathrm m^{-1}\)、\(e_y=2\,\mathrm m\)
+给出 \(\dot e_x=0.6\,\mathrm{m/s}\)。
+
+**结论二：六状态模型不需要 \(e_x\equiv0\)。** 在 (D116) 中被丢弃的是
+\(U\rho e_x\)，由 (K0) 的 \(e_x/L_1=O(\varepsilon)\) 与 \(L_1\rho=O(\varepsilon)\) 得
+
+\[
+U\rho e_x=U\cdot(L_1\rho)\cdot\frac{e_x}{L_1}=O(\varepsilon^2)U,
+\tag{D151}
+\]
+
+本来就低于保留阶次。所以 (K34)–(K41) 是原点附近一致的一阶模型，
+其有效性只要求 \(e_x\) 是小量，不要求它为零。
+
+**结论三：工程上可把 \(e_x\) 主动压回。** 每拍将参考点重新投影到车辆当前位置，
+即取 \(s\) 使 \(e_x=0\)，则 (D150) 的漂移在每个采样点被清零。仓库走这条路：
+`DemoSession::updatePathProgress` 用 `ReferencePath::project` 在有界弧长窗口内
+做最近点投影，再由 `updateMeasuredErrorState` 重算 \(e_y,e_\psi\)。
+
+失效条件：\(\rho e_y\) 不再是小量时（大曲率叠加大横向误差），(D151) 和最近点投影
+同时失去依据，必须换用含 \(\dot s\) 与 \(1-\rho e_y\) 的严格 Frenet 模型。
+
+### 11.2 变速工况的遗漏项
+
+全文动力学层设 \(U\) 恒定。设 \(U=U(t)\)，\(\dot U\neq0\)，逐处检查。
+
+**（a）铰接约束微分。** 位置级约束 (D58) 为
+\(v_{y2}=v_{y1}-d_1r_1-a_2r_2+U\phi\)。求导时 \(U\phi\) 是乘积：
+
+\[
+\dot v_{y2}
+=\dot v_{y1}-d_1\dot r_1-a_2\dot r_2
++U\dot\phi+\dot U\phi.
+\tag{D152}
+\]
+
+用 \(\dot\phi=r_1-r_2\) 得
+
+\[
+\boxed{
+\dot v_{y1}-d_1\dot r_1-\dot v_{y2}-a_2\dot r_2
++U(r_1-r_2)+\dot U\phi=0.
+}
+\tag{D153}
+\]
+
+与 (D60) 相比多出 \(\dot U\phi\)。它会进入第 8 章的 \(\boldsymbol s\) 向量，
+从而改变 \(A_q\)：约束导数项由 \(\boldsymbol s^T\boldsymbol q\) 变为
+\(\boldsymbol s^T\boldsymbol q-\dot U\phi\)。
+
+**（b）横向误差二阶导。** 由 (D116) 的一阶式 \(\dot e_y=v_{y1}+Ue_\psi\)：
+
+\[
+\ddot e_y=\dot v_{y1}+U\dot e_\psi+\dot Ue_\psi.
+\tag{D154}
+\]
+
+与 (D129) 相比多出 \(\dot Ue_\psi\)。
+
+**（c）航向误差二阶导。** 由 (D120) 的 \(r_1=\dot e_\psi+U\rho\)：
+
+\[
+\dot r_1=\ddot e_\psi+U\dot\rho+\dot U\rho
+\quad\Longrightarrow\quad
+\ddot e_\psi=\dot r_1-U\dot\rho-\dot U\rho.
+\tag{D155}
+\]
+
+与 (D133) 相比多出 \(-\dot U\rho\)。同理 (D123) 的 \(\dot r_2\) 也多出 \(\dot U\rho\)。
+
+**（d）轮胎与矩阵。** (D64)–(D66) 含 \(1/U\)，故 \(K_e\)、\(A_p\)、\(B_p\)、
+\(A_c\)、\(B_c\)、\(E_\rho\)、\(E_{\dot\rho}\) 全部是 \(U(t)\) 的函数。
+
+**仓库的处理方式：冻结时间（准 LPV）。**
+`DemoSession::updateAdaptiveSpeed` 在
+\(|U-U_{\mathrm{sched}}|\ge0.25\,\mathrm{m/s}\)（`kModelSpeedScheduleThreshold`）
+时用当前车速调 `buildDynamicModel` / `buildErrorModel` 重建矩阵；两次重建之间按恒速
+模型积分，即 (D153)–(D155) 的 \(\dot U\) 项被忽略。
+
+误差量级：取最大减速度 \(\dot U=-2.5\,\mathrm{m/s^2}\)、\(\phi=0.1\,\mathrm{rad}\)，则
+
+\[
+|\dot U\phi|=0.25\,\mathrm{m/s^2},
+\]
+
+同工况 \(U=15\,\mathrm{m/s}\)、\(r_1-r_2=0.1\,\mathrm{rad/s}\) 时
+
+\[
+|U(r_1-r_2)|=1.5\,\mathrm{m/s^2},
+\]
+
+相对误差约 **17%**。缓加减速（\(|\dot U|\lesssim0.5\,\mathrm{m/s^2}\)）下可接受；
+急制动配合大铰接角时必须改用含 \(\dot U\) 的时变模型。
+
+### 11.3 曲率率是时间导数
+
+参考线一般按弧长参数化给出 \(\kappa(s)\)，而 (D140) 需要的是 \(\rho(t)\) 的时间导数。
+令 \(\rho(t)=\kappa(s(t))\)，链式法则给出
+
+\[
+\dot\rho=\frac{d\kappa}{ds}\,\dot s.
+\tag{D156}
+\]
+
+参考点沿参考线以 \(U\) 前进，故 \(\dot s=U\)：
+
+\[
+\boxed{
+\dot\rho=U\,\frac{d\kappa}{ds}.
+}
+\tag{D157}
+\]
+
+(D157) 对变速同样成立，因为 \(\dot s=U\) 不要求 \(U\) 恒定。
+
+量纲检查：\([\kappa]=\mathrm m^{-1}\)，\([d\kappa/ds]=\mathrm m^{-2}\)，
+\([\dot\rho]=\mathrm m^{-1}\mathrm s^{-1}\)。
+
+**接口对应。** `ReferencePath::curvatureDerivative` 存的是 \(d\kappa/ds\)；
+`CurvatureSample::curvatureRate` 要求 \(\dot\rho\)。二者相差一个 \(U\)，
+遗漏会使 (D144) 的 \(-U\dot\rho\) 通道整体缩放错误。`DemoSession::step` 的正确写法：
+
+```cpp
+preview.push_back({reference.curvature,
+                   currentSpeed_ * reference.curvatureDerivative});
+```

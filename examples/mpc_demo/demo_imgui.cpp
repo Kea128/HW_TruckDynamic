@@ -261,7 +261,7 @@ private:
         ImGui::TextColored(
             darkTheme_ ? ImVec4(0.25f, 0.75f, 1.0f, 1.0f)
                        : ImVec4(0.04f, 0.42f, 0.72f, 1.0f),
-            u8"MPC Studio 2.8.1");
+            u8"MPC Studio 2.9.0");
         ImGui::PopStyleColor();
         ImGui::SameLine(235.0f);
 
@@ -542,12 +542,30 @@ private:
             booleanProperty(
                 u8"启用 Delayed EKF",
                 draft_.lidarFusionEnabled);
+            processModelProperty(
+                u8"过程模型", draft_.articulationEstimator.processModel);
             property(u8"雷达周期 [s]", draft_.lidarPeriod, 0.01, "%.3f");
             property(u8"最小时延 [s]", draft_.lidarDelayMin, 0.01, "%.3f");
             property(u8"最大时延 [s]", draft_.lidarDelayMax, 0.01, "%.3f");
+            property(
+                u8"历史窗 [s]",
+                draft_.articulationEstimator.historyHorizon,
+                0.05,
+                "%.3f");
             double lidarNoiseDegrees = degrees(draft_.lidarNoiseStd);
             property(u8"雷达噪声 [deg]", lidarNoiseDegrees, 0.1);
             draft_.lidarNoiseStd = radians(lidarNoiseDegrees);
+            double lidarBiasDegrees = degrees(draft_.lidarInstallationBias);
+            property(u8"雷达安装偏差 [deg]", lidarBiasDegrees, 0.1);
+            draft_.lidarInstallationBias = radians(lidarBiasDegrees);
+            double lidarBiasCalibrationDegrees =
+                degrees(draft_.articulationEstimator.lidarBiasCalibration);
+            property(u8"偏差标定值 [deg]", lidarBiasCalibrationDegrees, 0.1);
+            draft_.articulationEstimator.lidarBiasCalibration =
+                radians(lidarBiasCalibrationDegrees);
+            booleanProperty(
+                u8"在线估计雷达偏差",
+                draft_.articulationEstimator.estimateLidarBias);
             booleanProperty(
                 u8"R 跟随雷达噪声",
                 draft_.ekfMeasurementFollowsLidar);
@@ -560,22 +578,48 @@ private:
             property(u8"量测 R 标准差 [deg]", ekfMeasurementStdDegrees_, 0.1);
             ImGui::EndDisabled();
             property(
-                u8"Q_phi 标准差 [deg/s]",
+                u8"Q_phi 密度 [deg/s/√s]",
                 ekfPhiProcessStdDegrees_,
                 0.1);
             property(
-                u8"Q_br2 标准差 [deg/s]",
+                u8"Q_br2 密度 [deg/s/s^1.5]",
                 ekfTrailerBiasStdDegrees_,
                 0.01,
                 "%.3f");
             property(
-                u8"Q_bphi 标准差 [deg]",
+                u8"Q_bphi 密度 [deg/√s]",
                 ekfLidarBiasStdDegrees_,
                 0.001,
                 "%.4f");
             ImGui::EndTable();
             ImGui::TextDisabled(
-                u8"R 为量测方差 (σ°)²；Q 为过程噪声标准差。改后点应用。");
+                u8"R 为量测方差 (σ°)²。Q 为连续功率谱密度的平方根，\n"
+                u8"不是每拍方差；离散化按实际步长积分。改后点应用。");
+        }
+        if (ImGui::CollapsingHeader(u8"传感器与影子模型")) {
+            parameterTableBegin("sensors_shadow");
+            double yawNoiseDegrees = degrees(draft_.inputYawRateNoiseStd);
+            property(u8"横摆率噪声 [deg/s]", yawNoiseDegrees, 0.05, "%.3f");
+            draft_.inputYawRateNoiseStd = radians(yawNoiseDegrees);
+            double yawBiasDegrees = degrees(draft_.inputYawRateBias);
+            property(u8"横摆率偏置 [deg/s]", yawBiasDegrees, 0.05, "%.3f");
+            draft_.inputYawRateBias = radians(yawBiasDegrees);
+            property(
+                u8"车速噪声 [m/s]",
+                draft_.inputSpeedNoiseStd,
+                0.05,
+                "%.3f");
+            booleanProperty(
+                u8"用 Plant 真值初始化",
+                draft_.initializeEstimatorFromTruth);
+            booleanProperty(
+                u8"启用影子估计器",
+                draft_.shadowEstimatorEnabled);
+            processModelProperty(
+                u8"影子过程模型", draft_.shadowProcessModel);
+            ImGui::EndTable();
+            ImGui::TextDisabled(
+                u8"影子估计器吃同样的事件但不进控制回路，仅用于对比。");
         }
 
         ImGui::Spacing();
@@ -695,6 +739,27 @@ private:
         ImGui::InputInt(id.c_str(), &value, step, step * 10);
     }
 
+    void processModelProperty(
+        const char* label,
+        truck_model::ArticulationProcessModel& value) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-1.0f);
+        int selected =
+            value == truck_model::ArticulationProcessModel::dynamic ? 1 : 0;
+        const char* items[] = {u8"运动学 K5", u8"动力学 K27r"};
+        std::string id = "##";
+        id += label;
+        if (ImGui::Combo(id.c_str(), &selected, items, 2)) {
+            value = selected == 1
+                        ? truck_model::ArticulationProcessModel::dynamic
+                        : truck_model::ArticulationProcessModel::kinematic;
+        }
+    }
+
     void booleanProperty(const char* label, bool& value) {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -725,11 +790,11 @@ private:
         ekfMeasurementStdDegrees_ = varianceToStdDegrees(
             draft_.articulationEstimator.measurementVariance);
         ekfPhiProcessStdDegrees_ = varianceToStdDegrees(
-            draft_.articulationEstimator.processArticulationRateVariance);
+            draft_.articulationEstimator.noiseDensity.articulationRate);
         ekfTrailerBiasStdDegrees_ = varianceToStdDegrees(
-            draft_.articulationEstimator.processTrailerYawBiasVariance);
+            draft_.articulationEstimator.noiseDensity.trailerYawBias);
         ekfLidarBiasStdDegrees_ = varianceToStdDegrees(
-            draft_.articulationEstimator.processLidarBiasVariance);
+            draft_.articulationEstimator.noiseDensity.lidarBias);
         error_.clear();
     }
 
@@ -749,11 +814,11 @@ private:
         draft_.articulationReference.phase = radians(phaseDegrees_);
         draft_.articulationEstimator.measurementVariance =
             stdDegreesToVariance(ekfMeasurementStdDegrees_);
-        draft_.articulationEstimator.processArticulationRateVariance =
+        draft_.articulationEstimator.noiseDensity.articulationRate =
             stdDegreesToVariance(ekfPhiProcessStdDegrees_);
-        draft_.articulationEstimator.processTrailerYawBiasVariance =
+        draft_.articulationEstimator.noiseDensity.trailerYawBias =
             stdDegreesToVariance(ekfTrailerBiasStdDegrees_);
-        draft_.articulationEstimator.processLidarBiasVariance =
+        draft_.articulationEstimator.noiseDensity.lidarBias =
             stdDegreesToVariance(ekfLidarBiasStdDegrees_);
     }
 
@@ -1785,7 +1850,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     RegisterClassExW(&windowClass);
     HWND window = CreateWindowW(
         windowClass.lpszClassName,
-        L"TruckModel MPC Studio 2.8.1",
+        L"TruckModel MPC Studio 2.9.0",
         WS_OVERLAPPEDWINDOW,
         80,
         60,

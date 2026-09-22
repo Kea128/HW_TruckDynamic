@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(truck_model VERSION 2.8.1 LANGUAGES CXX)
+project(truck_model VERSION 2.9.0 LANGUAGES CXX)
 
 add_library(truck_model
     src/articulated_vehicle.cpp
@@ -27,7 +27,10 @@ if(BUILD_TESTING)
     add_test(NAME truck_model_tests COMMAND truck_model_tests)
 endif()
 
-option(TRUCK_MODEL_BUILD_DEMO "Build the real-time MPC visualization demo" ON)
+option(TRUCK_MODEL_BUILD_DEMO "Build the MPC demo session library and its tests" ON)
+# The Studio executable needs Win32, DirectX 11 and a network fetch of
+# ImGui/ImPlot. Turn it off to build and test the headless demo core only.
+option(TRUCK_MODEL_BUILD_STUDIO "Build the ImGui MPC Studio executable" ON)
 if(TRUCK_MODEL_BUILD_DEMO)
     add_library(truck_mpc_demo_core
         examples/mpc_demo/articulation_reference.cpp
@@ -47,7 +50,7 @@ if(TRUCK_MODEL_BUILD_DEMO)
         add_test(NAME truck_mpc_demo_tests COMMAND truck_mpc_demo_tests)
     endif()
 
-    if(WIN32)
+    if(WIN32 AND TRUCK_MODEL_BUILD_STUDIO)
         include(FetchContent)
         FetchContent_Declare(
             dear_imgui
@@ -101,6 +104,8 @@ if(TRUCK_MODEL_BUILD_DEMO)
         if(MSVC)
             target_compile_options(truck_mpc_demo PRIVATE /W4 /permissive- /utf-8)
         endif()
+    elseif(NOT TRUCK_MODEL_BUILD_STUDIO)
+        message(STATUS "truck_mpc_demo disabled by TRUCK_MODEL_BUILD_STUDIO=OFF")
     else()
         message(STATUS "truck_mpc_demo is currently available on Windows only")
     endif()

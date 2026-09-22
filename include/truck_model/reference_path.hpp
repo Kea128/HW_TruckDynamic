@@ -17,6 +17,8 @@ struct ReferencePathPoint {
     double y{};
     double heading{};
     double curvature{};
+    // Arc-length derivative dKappa/ds [1/m^2]. The MPC curvature preview wants
+    // the time derivative dRho/dt = speed * curvatureDerivative.
     double curvatureDerivative{};
 };
 

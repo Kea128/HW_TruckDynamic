@@ -29,6 +29,16 @@ std::string csvEscape(const std::string& text) {
     return escaped;
 }
 
+const char* processModelName(truck_model::ArticulationProcessModel model) {
+    switch (model) {
+        case truck_model::ArticulationProcessModel::dynamic:
+            return "dynamic";
+        case truck_model::ArticulationProcessModel::kinematic:
+        default:
+            return "kinematic";
+    }
+}
+
 const char* referenceKindName(ArticulationReferenceKind kind) {
     switch (kind) {
         case ArticulationReferenceKind::sine:
@@ -130,21 +140,80 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "lidarDelayMin", settings.lidarDelayMin);
     writeKey(out, "lidarDelayMax", settings.lidarDelayMax);
     writeKey(out, "lidarNoiseStd", settings.lidarNoiseStd);
+    writeKey(out, "lidarInstallationBias", settings.lidarInstallationBias);
     writeKey(out, "lidarRandomSeed", static_cast<int>(settings.lidarRandomSeed));
-    writeKey(out, "ekf.historyHorizon", ekf.historyHorizon);
-    writeKey(out, "ekf.measurementVariance", ekf.measurementVariance);
+    writeKey(out, "inputYawRateNoiseStd", settings.inputYawRateNoiseStd);
+    writeKey(out, "inputYawRateBias", settings.inputYawRateBias);
+    writeKey(out, "inputSpeedNoiseStd", settings.inputSpeedNoiseStd);
+    writeKey(out, "inputRandomSeed", static_cast<int>(settings.inputRandomSeed));
     writeKey(
         out,
-        "ekf.processArticulationRateVariance",
-        ekf.processArticulationRateVariance);
+        "initializeEstimatorFromTruth",
+        settings.initializeEstimatorFromTruth);
+    writeKey(out, "shadowEstimatorEnabled", settings.shadowEstimatorEnabled);
     writeKey(
-        out, "ekf.processTrailerYawBiasVariance", ekf.processTrailerYawBiasVariance);
-    writeKey(out, "ekf.processLidarBiasVariance", ekf.processLidarBiasVariance);
-    writeKey(out, "ekf.truckYawRateVariance", ekf.truckYawRateVariance);
-    writeKey(out, "ekf.speedVariance", ekf.speedVariance);
+        out,
+        "shadowProcessModel",
+        std::string(processModelName(settings.shadowProcessModel)));
+    writeKey(
+        out,
+        "ekf.processModel",
+        std::string(processModelName(ekf.processModel)));
+    writeKey(out, "ekf.historyHorizon", ekf.historyHorizon);
+    writeKey(out, "ekf.measurementVariance", ekf.measurementVariance);
+    // Process noise is specified as continuous power spectral density; see
+    // docs/3 section 5.
+    writeKey(
+        out,
+        "ekf.noiseDensity.articulationRate",
+        ekf.noiseDensity.articulationRate);
+    writeKey(
+        out,
+        "ekf.noiseDensity.trailerYawBias",
+        ekf.noiseDensity.trailerYawBias);
+    writeKey(out, "ekf.noiseDensity.lidarBias", ekf.noiseDensity.lidarBias);
+    writeKey(out, "ekf.noiseDensity.truckYawRate", ekf.noiseDensity.truckYawRate);
+    writeKey(out, "ekf.noiseDensity.speed", ekf.noiseDensity.speed);
+    writeKey(
+        out,
+        "ekf.noiseDensity.truckLateralVelocity",
+        ekf.noiseDensity.truckLateralVelocity);
+    writeKey(
+        out,
+        "ekf.noiseDensity.trailerYawRate",
+        ekf.noiseDensity.trailerYawRate);
+    writeKey(out, "ekf.estimateLidarBias", ekf.estimateLidarBias);
+    writeKey(out, "ekf.lidarBiasCalibration", ekf.lidarBiasCalibration);
     writeKey(out, "ekf.mahalanobisGate", ekf.mahalanobisGate);
     writeKey(out, "ekf.consecutiveRejectLimit", ekf.consecutiveRejectLimit);
     writeKey(out, "ekf.lostTimeout", ekf.lostTimeout);
+    writeKey(out, "ekf.linkTimeout", ekf.linkTimeout);
+    writeKey(
+        out,
+        "ekf.initialArticulationVariance",
+        ekf.initialArticulationVariance);
+    writeKey(
+        out,
+        "ekf.initialTrailerYawBiasVariance",
+        ekf.initialTrailerYawBiasVariance);
+    writeKey(
+        out, "ekf.initialLidarBiasVariance", ekf.initialLidarBiasVariance);
+    writeKey(
+        out,
+        "ekf.initialTruckLateralVelocityVariance",
+        ekf.initialTruckLateralVelocityVariance);
+    writeKey(
+        out,
+        "ekf.initialTrailerYawRateVariance",
+        ekf.initialTrailerYawRateVariance);
+    writeKey(
+        out,
+        "ekf.compatibility.nearestFrameAlignment",
+        ekf.compatibility.nearestFrameAlignment);
+    writeKey(
+        out,
+        "ekf.compatibility.diagonalEulerProcessNoise",
+        ekf.compatibility.diagonalEulerProcessNoise);
     writeKey(out, "scheduledModelSpeed", session.scheduledModelSpeed());
     writeKey(out, "sampleCount", session.history().size());
     if (session.controller() != nullptr) {
@@ -173,13 +242,19 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
         << "speed,planned_speed,cruise_speed,scheduled_model_speed,models_rebuilt,"
         << "rho,rho_dot,phi_ref,phi_ref_dot,phi_tracking_error,"
         << "ekf_phi,ekf_phi_dot,ekf_r2,ekf_r2_kin,ekf_b_r2,ekf_b_phi,"
-        << "ekf_truck_yaw_residual,ekf_P_phi,ekf_P_br2,ekf_P_bphi,"
+        << "ekf_vy1,ekf_truck_yaw_residual,ekf_P_phi,ekf_P_br2,ekf_P_bphi,"
         << "ekf_innovation,ekf_S,ekf_mahalanobis,"
         << "ekf_K_phi,ekf_K_br2,ekf_K_bphi,"
-        << "ekf_history_size,ekf_aligned_stamp,ekf_last_accepted_stamp,"
+        << "ekf_history_size,ekf_replayed,ekf_aligned_stamp,"
+        << "ekf_last_accepted_stamp,ekf_information_age,ekf_arrival_gap,"
         << "ekf_consecutive_rejects,ekf_accepted,ekf_gated,ekf_coasting,"
+        << "ekf_link_stalled,ekf_outcome,"
+        << "shadow_phi,shadow_phi_dot,shadow_r2,shadow_b_r2,shadow_P_phi,"
+        << "sensed_r1,sensed_speed,"
         << "lidar_z,lidar_stamp,lidar_delay,lidar_queue,lidar_delivered,"
         << "lidar_accepted,lidar_gated,"
+        << "lidar_delivered_count,lidar_accepted_count,lidar_gated_count,"
+        << "lidar_dropped_count,"
         << "truck_x,truck_y,truck_heading,hitch_x,hitch_y,"
         << "trailer_x,trailer_y,trailer_heading,warning_active,warning\n";
     out << std::setprecision(12);
@@ -207,21 +282,36 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
             << sample.estimatedArticulationRate << ','
             << e.trailerYawRate << ',' << e.kinematicTrailerYawRate << ','
             << e.trailerYawBias << ',' << e.lidarBias << ','
-            << e.truckYawResidual << ',' << e.covariancePhi << ','
+            << e.truckLateralVelocity << ',' << e.truckYawResidual << ','
+            << e.covariancePhi << ','
             << e.covarianceTrailerBias << ',' << e.covarianceLidarBias << ','
             << e.innovation << ',' << e.innovationCovariance << ','
             << e.mahalanobis << ',' << e.kalmanGainPhi << ','
             << e.kalmanGainTrailerBias << ',' << e.kalmanGainLidarBias << ','
-            << e.historySize << ',' << e.alignedStamp << ','
-            << e.lastAcceptedStamp << ',' << e.consecutiveRejects << ','
+            << e.historySize << ',' << e.replayedEntries << ','
+            << e.alignedStamp << ','
+            << e.lastAcceptedStamp << ',' << e.informationAge << ','
+            << e.arrivalGap << ',' << e.consecutiveRejects << ','
             << (e.measurementAccepted ? 1 : 0) << ','
             << (e.measurementGated ? 1 : 0) << ','
             << (e.coasting ? 1 : 0) << ','
+            << (e.linkStalled ? 1 : 0) << ','
+            << truck_model::measurementOutcomeName(e.outcome) << ','
+            << sample.shadowArticulation << ','
+            << sample.shadowArticulationRate << ','
+            << sample.shadowEstimator.trailerYawRate << ','
+            << sample.shadowEstimator.trailerYawBias << ','
+            << sample.shadowEstimator.covariancePhi << ','
+            << sample.measuredTruckYawRate << ',' << sample.measuredSpeed << ','
             << sample.lidarArticulation << ',' << sample.lidarStamp << ','
             << sample.lidarDelay << ',' << sample.lidarQueueSize << ','
             << (sample.lidarDelivered ? 1 : 0) << ','
             << (sample.lidarAccepted ? 1 : 0) << ','
             << (sample.lidarGated ? 1 : 0) << ','
+            << sample.lidarDeliveredCount << ','
+            << sample.lidarAcceptedCount << ','
+            << sample.lidarGatedCount << ','
+            << sample.lidarDroppedCount << ','
             << sample.vehicle.truckX << ',' << sample.vehicle.truckY << ','
             << sample.vehicle.truckHeading << ',' << sample.vehicle.hitchX << ','
             << sample.vehicle.hitchY << ',' << sample.vehicle.trailerX << ','
@@ -255,7 +345,7 @@ void writePath(std::ostream& out, const DemoSession& session) {
 }
 
 const char* kReadme = R"(TruckModel demo run log
-See docs/3_articulation_fusion_filter.md section 7.
+See docs/3_articulation_fusion_filter.md section 10.
 
 Files:
   settings.txt     vehicle, MPC Q/R, lidar, EKF, discrete Ad/Bd
@@ -263,11 +353,31 @@ Files:
   mpc_horizon.csv  predicted x_c at each horizon index k
   path.csv         reference path samples
 
-Key timeseries columns for articulation amplitude:
+Articulation amplitude:
   plant_phi, ekf_phi, lidar_z
   plant_r2, ekf_r2, ekf_r2_kin
-  ekf_innovation, ekf_S, ekf_mahalanobis, ekf_coasting
-  lidar_delay, lidar_delivered, lidar_gated
+  plant_phi_dot, ekf_phi_dot        rate is a first-class metric, not optional
+
+Shadow model (second estimator, never drives the controller):
+  shadow_phi, shadow_phi_dot, shadow_r2, shadow_b_r2
+
+Filter health:
+  ekf_innovation, ekf_S, ekf_mahalanobis
+  ekf_information_age   age of the newest fused scan
+  ekf_arrival_gap       wall-clock time since the last accepted update
+  ekf_coasting          open loop, derived from information age
+  ekf_link_stalled      link health, derived from arrival gap
+  ekf_replayed          timeline entries recomputed by the last update
+
+Lidar packets. The *_count columns are per control step; a step can service
+several scans, so the boolean columns and ekf_outcome only describe the last
+one.
+  lidar_delay, lidar_queue, ekf_outcome
+  lidar_delivered_count, lidar_accepted_count
+  lidar_gated_count, lidar_dropped_count
+
+Sensed inputs actually fed to the filter (noisy when injection is enabled):
+  sensed_r1, sensed_speed
 )";
 
 }  // namespace

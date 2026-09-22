@@ -510,6 +510,206 @@ void testLidarFusionTracksPlantArticulation() {
         "delayed EKF was worse than the raw delayed lidar");
 }
 
+// A variable latency lets a later scan overtake an earlier one. The estimator
+// has to reorder them by stamp and still converge.
+void testOutOfOrderDeliveryStillTracks() {
+    truck_demo::DemoSession session;
+    auto settings = session.settings();
+    settings.lidarFusionEnabled = true;
+    settings.lidarPeriod = 0.1;
+    settings.lidarDelayMin = 0.1;
+    settings.lidarDelayMax = 0.5;
+    settings.lidarNoiseStd = 0.0;
+    settings.adaptiveSpeedEnabled = false;
+    settings.articulationEstimator.historyHorizon = 0.7;
+    session.configure(settings);
+    session.start();
+
+    std::size_t outOfOrder = 0;
+    double previousStamp = -1.0;
+    double estimateSse = 0.0;
+    int scored = 0;
+    for (std::size_t step = 0; step < 300; ++step) {
+        session.step();
+        if (session.history().empty()) {
+            continue;
+        }
+        const auto& latest = session.history().back();
+        if (latest.lidarDeliveredCount > 0) {
+            if (previousStamp >= 0.0 && latest.lidarStamp < previousStamp) {
+                ++outOfOrder;
+            }
+            previousStamp = latest.lidarStamp;
+        }
+        if (latest.time >= 1.0) {
+            const double error =
+                latest.estimatedArticulation - latest.plantArticulation;
+            estimateSse += error * error;
+            ++scored;
+        }
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+
+    require(
+        outOfOrder > 0,
+        "a 0.1-0.5 s latency spread must produce out-of-order arrivals");
+    require(scored > 20, "out-of-order run produced too little telemetry");
+    const double rmse = std::sqrt(estimateSse / scored);
+    require(rmse < 0.05, "out-of-order arrivals broke articulation tracking");
+}
+
+// Without truth initialization and with noisy, biased sensors the filter still
+// has to converge; that is the configuration a vehicle actually runs.
+void testColdStartWithNoisySensors() {
+    truck_demo::DemoSession session;
+    auto settings = session.settings();
+    settings.lidarFusionEnabled = true;
+    settings.lidarNoiseStd = 0.0174;
+    settings.initializeEstimatorFromTruth = false;
+    settings.inputYawRateNoiseStd = 0.005;
+    settings.inputYawRateBias = 0.004;
+    settings.inputSpeedNoiseStd = 0.2;
+    settings.initialArticulation = 0.12;
+    settings.adaptiveSpeedEnabled = false;
+    session.configure(settings);
+
+    require(
+        std::abs(session.articulationEstimate().articulation) < 1.0e-9,
+        "a cold start must not seed the filter with the plant articulation");
+
+    session.start();
+    double estimateSse = 0.0;
+    int scored = 0;
+    for (std::size_t step = 0; step < 300; ++step) {
+        session.step();
+        const auto& latest = session.history().back();
+        require(
+            std::isfinite(latest.estimatedArticulation),
+            "cold-start estimate became non-finite");
+        if (latest.time >= 2.0) {
+            const double error =
+                latest.estimatedArticulation - latest.plantArticulation;
+            estimateSse += error * error;
+            ++scored;
+        }
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+    require(scored > 20, "cold-start run produced too little telemetry");
+    require(
+        std::sqrt(estimateSse / scored) < 0.06,
+        "filter failed to converge from a cold start with noisy sensors");
+}
+
+// The shadow estimator sees the same events but never reaches the controller.
+void testShadowEstimatorRunsInParallel() {
+    truck_demo::DemoSession session;
+    auto settings = session.settings();
+    settings.lidarFusionEnabled = true;
+    settings.lidarNoiseStd = 0.0;
+    settings.adaptiveSpeedEnabled = false;
+    settings.shadowEstimatorEnabled = true;
+    settings.articulationEstimator.processModel =
+        truck_model::ArticulationProcessModel::kinematic;
+    settings.shadowProcessModel =
+        truck_model::ArticulationProcessModel::dynamic;
+    session.configure(settings);
+    session.start();
+
+    double primarySse = 0.0;
+    double shadowSse = 0.0;
+    int scored = 0;
+    for (std::size_t step = 0; step < 300; ++step) {
+        session.step();
+        const auto& latest = session.history().back();
+        if (latest.time >= 1.0) {
+            const double primary =
+                latest.estimatedArticulationRate - latest.plantArticulationRate;
+            const double shadow =
+                latest.shadowArticulationRate - latest.plantArticulationRate;
+            primarySse += primary * primary;
+            shadowSse += shadow * shadow;
+            ++scored;
+        }
+        if (session.simulationState() ==
+            truck_demo::SimulationState::finished) {
+            break;
+        }
+    }
+    require(scored > 20, "shadow run produced too little telemetry");
+    require(
+        std::sqrt(shadowSse / scored) < std::sqrt(primarySse / scored),
+        "the dynamic shadow model must track the articulation rate better");
+    require(
+        std::abs(session.state()[4] -
+                 session.articulationEstimate().articulation) < 1.0e-12,
+        "the controller must consume the primary estimate, not the shadow");
+}
+
+// A replay window shorter than the worst-case latency silently discards scans,
+// so the configuration has to be rejected up front.
+void testHistoryHorizonMustCoverLatency() {
+    truck_demo::DemoSession session;
+    auto settings = session.settings();
+    settings.lidarFusionEnabled = true;
+    settings.lidarDelayMax = 0.5;
+    settings.articulationEstimator.historyHorizon = 0.4;
+    bool rejected = false;
+    try {
+        session.configure(settings);
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(
+        rejected,
+        "history horizon below the worst-case latency must be rejected");
+}
+
+// An uncalibrated lidar mounting bias propagates straight into the estimate,
+// which is why the bias is frozen at a calibration rather than fitted online.
+void testLidarInstallationBiasNeedsCalibration() {
+    const double bias = 0.0175;
+    const auto run = [bias](double calibration) {
+        truck_demo::DemoSession session;
+        auto settings = session.settings();
+        settings.lidarFusionEnabled = true;
+        settings.lidarNoiseStd = 0.0;
+        settings.adaptiveSpeedEnabled = false;
+        settings.lidarInstallationBias = bias;
+        settings.articulationEstimator.lidarBiasCalibration = calibration;
+        session.configure(settings);
+        session.start();
+        double sse = 0.0;
+        int scored = 0;
+        for (std::size_t step = 0; step < 250; ++step) {
+            session.step();
+            const auto& latest = session.history().back();
+            if (latest.time >= 2.0) {
+                const double error =
+                    latest.estimatedArticulation - latest.plantArticulation;
+                sse += error * error;
+                ++scored;
+            }
+            if (session.simulationState() ==
+                truck_demo::SimulationState::finished) {
+                break;
+            }
+        }
+        return std::sqrt(sse / std::max(scored, 1));
+    };
+
+    const double uncalibrated = run(0.0);
+    const double calibrated = run(bias);
+    require(
+        calibrated < 0.5 * uncalibrated,
+        "calibrating the lidar mounting bias must remove most of the error");
+}
+
 void testSessionLogExportContainsFusionColumns() {
     truck_demo::DemoSession session;
     auto settings = session.settings();
@@ -545,6 +745,12 @@ void testSessionLogExportContainsFusionColumns() {
     require(
         settingsText.find("mpc.Q_phi=") != std::string::npos,
         "settings.txt is missing MPC weights");
+    require(
+        settingsText.find("ekf.processModel=") != std::string::npos &&
+            settingsText.find("ekf.noiseDensity.articulationRate=") !=
+                std::string::npos &&
+            settingsText.find("ekf.estimateLidarBias=") != std::string::npos,
+        "settings.txt is missing the v2 estimator configuration");
 
     std::ifstream timeseries((directory / "timeseries.csv").string());
     require(static_cast<bool>(timeseries), "timeseries.csv was not written");
@@ -555,6 +761,22 @@ void testSessionLogExportContainsFusionColumns() {
             header.find("ekf_phi") != std::string::npos &&
             header.find("lidar_z") != std::string::npos,
         "timeseries.csv is missing fusion columns");
+    require(
+        header.find("ekf_information_age") != std::string::npos &&
+            header.find("ekf_arrival_gap") != std::string::npos &&
+            header.find("ekf_link_stalled") != std::string::npos &&
+            header.find("ekf_outcome") != std::string::npos,
+        "timeseries.csv is missing the v2 diagnostic columns");
+    require(
+        header.find("lidar_delivered_count") != std::string::npos &&
+            header.find("lidar_accepted_count") != std::string::npos &&
+            header.find("lidar_gated_count") != std::string::npos &&
+            header.find("lidar_dropped_count") != std::string::npos,
+        "timeseries.csv is missing the per-step packet counters");
+    require(
+        header.find("shadow_phi") != std::string::npos &&
+            header.find("sensed_r1") != std::string::npos,
+        "timeseries.csv is missing the shadow and sensed-input columns");
     std::size_t rows = 0;
     std::string line;
     while (std::getline(timeseries, line)) {
@@ -593,6 +815,11 @@ int main() {
         testDrawnArticulationReferenceSamples();
         testDrawnPathCurvatureIsSmooth();
         testLidarFusionTracksPlantArticulation();
+        testOutOfOrderDeliveryStillTracks();
+        testColdStartWithNoisySensors();
+        testShadowEstimatorRunsInParallel();
+        testHistoryHorizonMustCoverLatency();
+        testLidarInstallationBiasNeedsCalibration();
         testSessionLogExportContainsFusionColumns();
     } catch (const std::exception& error) {
         std::cerr << "Unexpected demo exception: " << error.what() << '\n';

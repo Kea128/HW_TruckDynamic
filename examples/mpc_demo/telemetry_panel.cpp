@@ -277,6 +277,7 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
     articulationReference_.resize(history.size());
     articulationRate_.resize(history.size());
     plantArticulation_.resize(history.size());
+    shadowArticulation_.resize(history.size());
     lidarArticulation_.resize(history.size());
     articulationTrackingError_.resize(history.size());
     truckYawRate_.resize(history.size());
@@ -295,6 +296,7 @@ void TelemetryPanel::rebuildPlotData(const DemoSession& session) {
         articulationReference_[i] = degrees(history[i].referenceArticulation);
         articulationRate_[i] = degrees(history[i].state[5]);
         plantArticulation_[i] = degrees(history[i].plantArticulation);
+        shadowArticulation_[i] = degrees(history[i].shadowArticulation);
         lidarArticulation_[i] = degrees(history[i].lidarArticulation);
         articulationTrackingError_[i] =
             degrees(history[i].articulationTrackingError);
@@ -377,6 +379,15 @@ void TelemetryPanel::plotArticulationCell(
                     time_.data(),
                     lidarArticulation_.data(),
                     static_cast<int>(lidarArticulation_.size()));
+                if (session.settings().shadowEstimatorEnabled) {
+                    ImPlot::SetNextLineStyle(
+                        ImVec4(0.95f, 0.72f, 0.28f, 1.0f), 1.4f);
+                    ImPlot::PlotLine(
+                        u8"影子",
+                        time_.data(),
+                        shadowArticulation_.data(),
+                        static_cast<int>(shadowArticulation_.size()));
+                }
             }
             ImPlot::SetNextLineStyle(
                 ImVec4(1.0f, 0.56f, 0.20f, 1.0f), 2.0f);

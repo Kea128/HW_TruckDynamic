@@ -79,12 +79,134 @@ L_1\rho,\ L_2\rho,\
 =O(\varepsilon).
 \]
 
+第 7 章的误差量同样纳入该阶次表：
+\[
+e_\psi,\ \frac{e_x}{L_1},\ \frac{e_y}{L_1}
+=O(\varepsilon).
+\tag{K0}
+\]
+式 (K0) 不是额外假设，而是第 7 章线性化本来就隐含的前提；把它写出来是为了让
+\(\rho e_x\)、\(\rho e_y\) 这类乘积的二阶性可以直接判定（见 1.4 节第 1 条）。
+
 1. **非线性运动学**：纯滚动，以卡车后轴前向速度 \(U_1\) 为输入，可保留
    \(\tan\delta,\sin\phi,\cos\phi\)；
 2. **线性横向动力学**：\(U>0\) 恒定，小 \(\delta,\phi,\alpha\)，线性轮胎；
 3. **误差状态模型**：在线性横向动力学上叠加时间参数化参考轨迹。
 
 动力学模型不包含纵向加减速、强制动/驱动、轮胎饱和、载荷转移和大铰接角。
+
+### 1.4 假设边界与失效条件
+
+以下四条是使用本文矩阵时最容易被忽略的边界。每条都给出**严格条件**和**违反时的量级**，
+便于判断某个工况还能不能用这套模型。逐式推导见
+[`2_truck_model_derivation.md`](2_truck_model_derivation.md) 第 11 章。
+
+#### 1.4.1 纵向匹配 \(e_x\)：不是不变流形
+
+时间参考点以恒定 \(U\) 前进时，\(e_x\) 一般**不**保持为零：
+
+\[
+\boxed{
+\dot e_x=U\rho e_y+O(\varepsilon^2)U.
+}
+\tag{K0a}
+\]
+
+\(U=15\,\mathrm{m/s}\)、\(\rho=0.02\,\mathrm m^{-1}\)、\(e_y=2\,\mathrm m\) 时
+\(\dot e_x=0.6\,\mathrm{m/s}\)，几秒内就能积累到米级。
+
+因此第 7 章的 \(e_x\equiv0\) **不应读作精确恒等式**。正确的解释有两种，二者给出同一组矩阵：
+
+1. **一阶解释（本文采用）**：由式 (K0)，\(\rho e_x=O(\varepsilon^2)\)，
+   所以 (K34) 的 \(-U\rho e_x\) 项本来就低于保留阶次，与 \(e_x\) 是否恰好为零无关。
+   六状态模型是原点附近一致的一阶横向子系统，纵向误差在该阶次上解耦。
+2. **工程解释**：控制器每拍把参考点重新投影到车辆当前位置（最近点匹配），
+   使 \(e_x\) 在每个采样点被重置为 \(O(\varepsilon^2)\)。仓库实现走这条路：
+   `DemoSession::updatePathProgress` 调用 `ReferencePath::project` 做有界弧长最近点投影。
+
+**失效条件**：大横向误差叠加大曲率时 \(\rho e_y\) 不再是小量，
+一阶解释与工程解释同时失效，必须改用严格 Frenet 模型（含 \(\dot s\) 与 \(1-\rho e_y\) 项）。
+
+#### 1.4.2 纵向铰接力：需要附加阶次条件
+
+式 (K8) 的拖车横向方程丢弃了铰接纵向力的横向投影。精确投影为
+\(-F_{hx}\sin\phi-H\cos\phi\)（推导见 (D44)），其中被丢弃的
+
+\[
+-F_{hx}\sin\phi=-F_{hx}\phi+O(\varepsilon^3)
+\]
+
+在 \(F_{hx}\) 为 \(O(1)\) 时是**一阶项**，不能仅以"\(\phi\) 小"为由删除。使用 (K8) 需要
+
+\[
+\boxed{
+F_{hx,0}=0
+\quad\text{或}\quad
+F_{hx}=O(\varepsilon).
+}
+\tag{K8a}
+\]
+
+直线匀速巡航时 \(F_{hx}\) 只需克服拖车滚阻与气阻（\(18\,\mathrm t\) 拖车约
+\(1\text{–}3\,\mathrm{kN}\)），相对 \(10\text{–}30\,\mathrm{kN}\) 量级的轮胎侧向力属于高阶小量，
+条件近似成立。但**牵引或制动时不成立**：\(F_{hx}=30\,\mathrm{kN}\)、\(\phi=0.05\) 时，
+拖车横向方程漏掉约 \(1.5\,\mathrm{kN}\)，偏航方程漏掉约
+\(a_2F_{hx}\phi=6\,\mathrm{kN\,m}\)。
+
+**失效条件**：需要建模急加速、急制动或坡道牵引时，必须把 \(F_{hx}\) 显式引入
+(K8)，模型维数和输入都会增加；本文矩阵不适用。
+
+#### 1.4.3 变速工况：\(\dot U\neq0\) 的遗漏项
+
+全文动力学层设 \(U\) 恒定。若 \(U=U(t)\)，以下三处各多出一项：
+
+| 位置 | 恒速形式 | 变速时新增 |
+|---|---|---|
+| 约束微分 (K12) | \(\dot v_{y1}-d_1\dot r_1-\dot v_{y2}-a_2\dot r_2+U(r_1-r_2)=0\) | \(+\dot U\phi\) |
+| \(\ddot e_y\)（(K39) 第 2 行） | \(\ddot e_y=\dot v_{y1}+U\dot e_\psi\) | \(+\dot U e_\psi\) |
+| \(\ddot e_\psi\)（(K41) 通道） | \(\ddot e_\psi=\dot r_1-U\dot\rho\) | \(-\dot U\rho\) |
+
+此外轮胎公式含 \(1/U\)，\(A_p,B_p,A_c,B_c\) 全部随时间变化。
+
+仓库采用**准 LPV（冻结时间）调度**而不是时变模型：
+`DemoSession::updateAdaptiveSpeed` 在 \(|U-U_{\mathrm{sched}}|\ge0.25\,\mathrm{m/s}\)
+（`kModelSpeedScheduleThreshold`）时用当前车速重建 \(A_p,B_p,A_c,B_c\)，
+每次重建之间仍按恒速模型处理。
+
+量级：最大减速度 \(\dot U=-2.5\,\mathrm{m/s^2}\)、\(\phi=0.1\) 时
+\(|\dot U\phi|=0.25\,\mathrm{m/s^2}\)，而同工况 \(U(r_1-r_2)\) 在
+\(U=15,\ r_1-r_2=0.1\) 时为 \(1.5\,\mathrm{m/s^2}\)，即约 **17%** 的相对误差。
+
+**失效条件**：缓加减速（\(|\dot U|\lesssim0.5\,\mathrm{m/s^2}\)）下冻结时间近似可接受；
+急制动配合大铰接角时上述项不可忽略，应改用含 \(\dot U\) 的时变模型。
+
+#### 1.4.4 曲率率 \(\dot\rho\)：时间导数，不是空间导数
+
+全文 \(\dot\rho\) 一律是**对时间**的导数。参考线通常按弧长给出
+\(\rho(t)=\kappa(s(t))\)，取 \(\dot s=U\) 得
+
+\[
+\boxed{
+\dot\rho=\frac{d\rho}{dt}=U\,\frac{d\kappa}{ds},
+\qquad
+[\dot\rho]=\mathrm m^{-1}\mathrm s^{-1}.
+}
+\tag{K41a}
+\]
+
+该式对变速同样成立（只要 \(\dot s=U\)）。
+
+**接口含义**：`ReferencePath::curvatureDerivative` 是 \(d\kappa/ds\)，单位
+\(\mathrm m^{-2}\)；`CurvatureSample::curvatureRate` 要求 \(\dot\rho\)，单位
+\(\mathrm m^{-1}\mathrm s^{-1}\)。**把 \(d\kappa/ds\) 直接填进 MPC 会少一个速度因子。**
+正确写法见 `DemoSession::step`：
+
+```cpp
+preview.push_back({reference.curvature,
+                   currentSpeed_ * reference.curvatureDerivative});
+```
+
+只有直线和定半径圆弧才有 \(\dot\rho=0\)。
 
 ---
 
@@ -366,7 +488,12 @@ C_{1f}\\a_1C_{1f}\\0
 \tag{K19}
 \]
 
-### 5.4 四状态质量矩阵形式
+### 5.4 四状态描述矩阵形式
+
+下面的 \(\mathcal M\) 是**描述矩阵**（descriptor matrix），不是纯质量矩阵：
+前三行携带惯性量纲，第四行是运动学恒等式 \(\dot\phi=r_1-r_2\)，其"\(1\)"无量纲。
+因此不要对 \(\mathcal M\) 整体做量纲检查或物理解释，只对左上 \(3\times3\) 块
+（即 \(M_e\)）这样做。
 
 定义完整动力学状态：
 
@@ -517,6 +644,23 @@ B_p=
 \]
 其中 \(m_1,m_2,I_1,I_2>0\)。因此 \(M_e\) 可逆。
 
+更强也更直接的结论是 \(M_e\) **正定**。对任意
+\(\boldsymbol\xi=[x,y,z]^T\) 配方可得
+
+\[
+\boxed{
+\boldsymbol\xi^TM_e\boldsymbol\xi
+=m_1x^2+I_1y^2+I_2z^2
++m_2\left(x-d_1y-a_2z\right)^2>0,
+\qquad \boldsymbol\xi\neq\boldsymbol 0.
+}
+\tag{K29a}
+\]
+
+括号内正是铰接点横向速度的组合，所以式 (K29a) 也说明：\(M_e\) 的正定性来自两车
+自身惯性，与 \(d_1,a_2\) 取值无关。特别地 **\(d_1=b_1\) 不会使 \(M_e\) 退化**，
+第 5 章的消元在后轴铰接工况同样成立。
+
 \[
 \boxed{
 M_e^{-1}=
@@ -581,9 +725,13 @@ e_y=\boldsymbol n_{\mathrm{ref}}^T
 \[
 \dot e_y=-U\rho e_x+U\sin e_\psi+v_{y1}\cos e_\psi.
 \]
-本文六状态模型明确采用纵向匹配假设 \(e_x\equiv0\)，再对
-\(e_\psi,v_{y1}/U\) 作一阶线性化；因此它是时间参数化的小误差模型，而不是严格最近点
-Frenet 模型。
+由 1.3 节的阶次表 (K0)，\(e_x/L_1=O(\varepsilon)\) 且 \(L_1\rho=O(\varepsilon)\)，
+故 \(U\rho e_x=O(\varepsilon^2)U\) 低于保留阶次而脱落；再对
+\(e_\psi,v_{y1}/U\) 作一阶线性化即得 (K34)。因此本文六状态模型是**时间参数化的一阶
+小误差模型**，不是严格最近点 Frenet 模型。
+
+注意 \(e_x\) 一般**不**恒为零：由式 (K0a) 有 \(\dot e_x=U\rho e_y+O(\varepsilon^2)U\)。
+"纵向匹配"只在一阶意义下成立，详见 1.4.1 节。
 定义左转为正的参考曲率 \(\rho=\rho(t)\in C^1\)，
 \(\dot\rho=d\rho/dt\)。于是：
 
@@ -598,8 +746,8 @@ e_\psi=\theta_1-\theta_{\mathrm{ref}},
 
 ![六状态路径误差几何](images/path_error_geometry.svg)
 
-\(e_y\) 定义在卡车质心 \(O_1\)。纵向匹配假设使 \(O_1\) 落在参考法向
-\(\boldsymbol n_{\mathrm{ref}}\) 上，即 \(e_x\equiv 0\)。
+\(e_y\) 定义在卡车质心 \(O_1\)。一阶纵向匹配把 \(O_1\) 视为落在参考法向
+\(\boldsymbol n_{\mathrm{ref}}\) 上，即 \(e_x=O(\varepsilon)\) 且其与 \(\rho\) 的乘积可略。
 
 时间参数化参考轨迹的小误差运动学：
 
@@ -708,4 +856,11 @@ E_{\dot\rho}=
 }
 \tag{K41}
 \]
+
+式 (K41) 的 \(\dot\rho\) 是**时间导数**。参考线按弧长给出时必须先按式 (K41a)
+换算 \(\dot\rho=U\,d\kappa/ds\) 再代入，否则该通道会整体差一个速度因子；
+接口对应关系见 1.4.4 节。
+
+\(A_c,B_c,E_\rho,E_{\dot\rho}\) 均随 \(U\) 变化。变速工况下它们不仅要重新求值，
+还会多出 1.4.3 节列出的 \(\dot U\) 项；仓库按冻结时间（准 LPV）方式处理。
 

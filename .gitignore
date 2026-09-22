@@ -1,15 +1,29 @@
-# CMake and IDE output
-/build*/
-/.vs/
-/out/
-CMakeUserPresets.json
+# Build trees
+build/
+build-*/
+out/
+cmake-build-*/
+
+# Simulation exports. Regenerate with the Studio; see README.
+runs/
+
+# Release staging: binaries and archives do not belong in the source history.
+release/
+*.exe
+*.dll
+*.lib
+*.a
+*.obj
+*.o
+*.pdb
+*.ilk
+*.zip
+
+# Editor and OS
+.vs/
+.vscode/
+.idea/
 *.user
-
-# Runtime-generated UI state
-/imgui.ini
-
-# Demo session exports (settings + CSV)
-/runs/
-
-# Packaged binaries are rebuilt from source
-/release/
+*.swp
+Thumbs.db
+.DS_Store
