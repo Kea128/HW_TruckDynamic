@@ -76,7 +76,15 @@ if(TRUCK_MODEL_BUILD_DEMO)
             ${dear_imgui_SOURCE_DIR}
             ${dear_imgui_SOURCE_DIR}/backends
         )
-        target_link_libraries(truck_demo_imgui PUBLIC d3d11 dxgi)
+        # MSVC picks d3dcompiler and dwmapi up from #pragma comment(lib) inside
+        # the ImGui backends; other toolchains ignore those pragmas and need the
+        # libraries named explicitly.
+        target_link_libraries(truck_demo_imgui PUBLIC
+            d3d11
+            dxgi
+            d3dcompiler
+            dwmapi
+        )
 
         add_library(truck_demo_implot STATIC
             ${implot_source_SOURCE_DIR}/implot.cpp
@@ -103,6 +111,10 @@ if(TRUCK_MODEL_BUILD_DEMO)
         target_compile_definitions(truck_mpc_demo PRIVATE UNICODE _UNICODE)
         if(MSVC)
             target_compile_options(truck_mpc_demo PRIVATE /W4 /permissive- /utf-8)
+        elseif(MINGW)
+            # The entry point is wWinMain, which MinGW only emits with -municode.
+            target_compile_options(truck_mpc_demo PRIVATE -municode)
+            target_link_options(truck_mpc_demo PRIVATE -municode)
         endif()
     elseif(NOT TRUCK_MODEL_BUILD_STUDIO)
         message(STATUS "truck_mpc_demo disabled by TRUCK_MODEL_BUILD_STUDIO=OFF")
