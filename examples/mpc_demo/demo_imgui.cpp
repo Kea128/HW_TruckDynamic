@@ -262,7 +262,7 @@ private:
         ImGui::TextColored(
             darkTheme_ ? ImVec4(0.25f, 0.75f, 1.0f, 1.0f)
                        : ImVec4(0.04f, 0.42f, 0.72f, 1.0f),
-            u8"MPC Studio 2.9.0");
+            u8"MPC Studio 2.9.2");
         ImGui::PopStyleColor();
         ImGui::SameLine(235.0f);
 
@@ -1928,7 +1928,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     RegisterClassExW(&windowClass);
     HWND window = CreateWindowW(
         windowClass.lpszClassName,
-        L"TruckModel MPC Studio 2.9.0",
+        L"TruckModel MPC Studio 2.9.2",
         WS_OVERLAPPEDWINDOW,
         80,
         60,

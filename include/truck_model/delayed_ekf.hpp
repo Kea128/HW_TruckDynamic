@@ -50,10 +50,11 @@ enum class MeasurementOutcome {
 }
 
 struct DelayedEkfLimits {
-    // At least the largest scan age the filter can actually see, plus one
-    // control period; otherwise late packets fall outside the replay window
-    // and are discarded. Note that the visible age is the reported stamp's
-    // age, which equals the true latency only when the stamp is trustworthy.
+    // At least the largest scan age the filter can actually see, plus the
+    // maximum service wait, plus the largest adjacent-frame gap trim() may
+    // cross. On the demo's fixed grid the latter two are one control period
+    // each, hence visible age + 2 periods. Note that visible age equals true
+    // latency only when the stamp is trustworthy.
     double historyHorizon{0.55};
     double mahalanobisGate{9.0};
     int consecutiveRejectLimit{3};

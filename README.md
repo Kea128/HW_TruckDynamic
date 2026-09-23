@@ -30,7 +30,7 @@ Windows 下额外构建实时可视化 `truck_mpc_demo`。
 ## 环境
 
 - Windows 10/11 或 Server，CMake ≥ 3.16，C++17 编译器（MSVC 或 MinGW-w64 GCC 均可；
-  2.9.0 的发布包用 GCC 13.2 构建）
+  2.9.2 的发布包用 GCC 13.2 构建）
 - 配置 Studio 时 CMake 会下载 ImGui v1.92.9、ImPlot v0.17（需能访问 GitHub）
 - 只编核心库、不编界面：`-DTRUCK_MODEL_BUILD_DEMO=OFF`
 - 编核心库与 Demo 会话、但跳过 ImGui 界面（无需 DirectX 或联网，可在 GCC/Clang 下跑全部测试）：
