@@ -1,0 +1,4 @@
+# PDFs must stay byte-exact. Some have no NUL byte near the start, so
+# heuristics that sample only the head of a file can mistake them for text
+# and let core.autocrlf rewrite their line endings on checkout.
+*.pdf binary

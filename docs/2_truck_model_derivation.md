@@ -8,6 +8,9 @@
 可视化验证报告见
 [最新推导验证 Canvas](https://cursor.com/dashboard/shared-canvases?shareId=canvas--dwF_B4CCAInb-mDcQVwzHpy)。
 
+与已发表文献对应的推导步骤，在相应位置以 **文献对照** 注明原文的章节、式号和页码；
+文献列表见文末"参考文献"一节。
+
 ---
 
 ## 1. 推导目标与模型边界
@@ -416,6 +419,13 @@ U_2=\boldsymbol e_{x2}^T\boldsymbol v_{R_2}
 
 所以得到关键公式文档式 (K5)。当 \(d_1=b_1\) 时立即得到式 (K6)。
 
+**文献对照：** 纯滚动假设下的同一运动学关系见 Ljungqvist 等 [1] 第 3 节式 (1e)（预印本第 9 页）：
+\(\dot\beta_2=v\big(\tan\alpha/L_1-\sin\beta_2/L_2+M_1\cos\beta_2\tan\alpha/(L_1L_2)\big)\)。
+其中 \(\beta_2\) 为牵引车与后一节车的铰接角，\(v\) 为牵引车后轴速度，\(\alpha\) 为前轮转角，
+\(M_1>0\) 为铰接点在牵引车后轴之后的偏置距离。取 \(\beta_2=\phi\)、\(v=U_1\)、\(\alpha=\delta\)、
+\(M_1=d_1-b_1\)，并由式 (D15) 把 \(v\tan\alpha/L_1\) 换成 \(r_1\)，即得式 (D29) 与式 (D28)；
+\(M_1=0\) 对应式 (K6)。
+
 ---
 
 ## 4. 车体坐标中的横向加速度
@@ -608,6 +618,17 @@ F_{H,y2}
 \tag{D44}
 \]
 
+**文献对照：** (D44) 这种"纵向分量乘 \(\sin\)、横向分量乘 \(\cos\)"的精确投影见：
+
+- 郑雪莲等 [2] 式 (2)（第 57 页）：挂车横向方程和横摆方程中的铰接力项均为
+  \(F_X\sin\theta-F_Y\cos\theta\)，其中 \(\theta=\psi_2-\psi_1\)，各项正负号取决于该文的方向约定；
+- 赵晋海等 [3] 式 (10)（第 16 页）：\(F_{jx}=F'_{jx}\cos\theta+F'_{jy}\sin\theta\)，
+  \(F_{jy}=F'_{jy}\cos\theta-F'_{jx}\sin\theta\)；同页式 (6) 挂车横摆力矩中的
+  \(F_{jy}\cos\delta+F_{jx}\sin\delta\) 应为 \(F_{jy}\cos\theta+F_{jx}\sin\theta\)（原文笔误），
+  即 (D44) 的形式；
+- Gäfvert 与 Lindgärde [4] 式 (6)（第 9 页）给出挂车系到牵引车系的精确旋转矩阵，
+  式 (21)–(22)（第 12 页）用它合并两车平动方程；(D44) 就是这一旋转在拖车左向的分量。
+
 小 \(\phi\) 且忽略纵向铰接力的一阶作用：
 
 \[
@@ -649,6 +670,25 @@ F_{hx}=O(\varepsilon).
 要覆盖这些工况必须把 \(F_{hx}\) 作为显式量保留，由拖车纵向方程补一条方程，
 模型维数和输入都会增加；本文矩阵不适用。
 
+**文献对照：** 文献普遍采用 (D45)，但给出的理由不同：
+
+- 郑雪莲等 [2] 第 58 页："当铰接角较小且铰接角变化缓慢时，认为 \(\cos\theta\approx1\)，
+  \(\sin\theta\approx0\)"。这里取 \(\sin\theta\approx0\) 而不是 \(\sin\theta\approx\theta\)，
+  只有在 (D45a) 成立时才与一阶模型相容，原文没有讨论纵向铰接力的量级；
+- 彭涛等 [5] 式 (3)（第 93 页）直接令挂车系铰接力分量等于牵引车系分量，
+  \(F_{xsh}=F_{xth}\)、\(F_{ysh}=F_{yth}\)，即忽略铰接角造成的坐标旋转；
+- 周猛等 [6] 第 1371 页设铰接力"垂直于牵引车纵向方向"，即一开始就令 \(F_{hx}=0\)，
+  挂车侧只剩 \(F_a\cos\theta\)（式 (4)(5)），随后在式 (10) 前取 \(\cos\theta=1\) 并令两车纵速相等；
+- Sharma 与 He [7] 式 (4)（第 5 页）保留了纵向力的力矩 \(F_{fx}\gamma L_{fs}\)；式 (7) 中该项已写成
+  \(m_t(-r_tv_{yt})L_{fs}\gamma\)，相当于用匀速、牵引车无纵向轮胎力条件下的纵向方程
+  \(F_{fx}=m_tr_tv_{yt}\) 代入（原文未写出这一步），该项成为二阶小量，在附录 A 的线性矩阵中消失。
+  这是文献中与 (D45a) 的 \(F_{hx,0}=0\) 条件最接近的论证；
+- Morrison 与 Cebon [8] 第 2.1 节（第 1603 页）假设纵速恒定、铰接角小，
+  第五轮处只保留侧向运动学约束。
+
+以上文献都没有讨论牵引、制动工况。不做 (D45) 近似、并计入变速影响的推导见
+[`4_hitch_force_free_derivation.md`](4_hitch_force_free_derivation.md)。
+
 拖车横向方程：
 
 \[
@@ -681,6 +721,11 @@ I_2\dot r_2=-b_2F_{2r}-a_2H.
 \]
 
 式 (D40)、(D43)、(D46)、(D48) 即关键公式文档式 (K8)。
+
+**文献对照：** 对两车分别写横向、横摆方程并显式保留铰接力，见周猛等 [6] 式 (1)(2)（第 1370 页）
+与式 (4)(5)（第 1371 页）、郑雪莲等 [2] 式 (1)(2)（第 57 页）、Sharma 与 He [7] 式 (1)–(4)
+（第 4–5 页）、彭涛等 [5] 式 (1)(2)（第 92 页）、赵晋海等 [3] 式 (1)–(6)（第 16 页）。
+这些模型多数另含侧倾或纵向自由度；Sharma 与 He 把挂车方程也写在牵引车坐标系下。
 
 ![线性横向动力学自由体图](images/lateral_force_diagram.svg)
 
@@ -828,6 +873,17 @@ v_{y2}=v_{y1}-d_1r_1-a_2r_2+U\phi.
 
 若 \(U\) 随时间变化，还必须增加 \(\dot U\phi\)。本文动力学假设 \(U\) 恒定。
 
+**文献对照：**
+
+- 精确速度约束 (D55) 及其求导见赵晋海等 [3] 式 (7)–(9) 和 (11)–(12)（第 16 页）；
+- 一阶约束 (D58) 中的 \(U\phi\) 项见李道飞等 [9] 式 (5) 下的说明（第 1100 页）：
+  \(v_{y2}=v_{y1}-f\omega_1-a_2\omega_2-v_{x1}\gamma\)，其中 \(\gamma=\psi_2-\psi_1=-\phi\)，
+  \(f\) 即本文 \(d_1\)；
+- 加速度约束 (D60) 见郑雪莲等 [2] 式 (9)（第 58 页），去掉侧倾项后为
+  \(\dot v_1-b_{r1}\dot r_1-\dot v_2-b_{r2}\dot r_2=u_1(r_2-r_1)\)，\(b_{r1}\)、\(b_{r2}\) 即本文
+  \(d_1\)、\(a_2\)；另见周猛等 [6] 式 (7)(8)（第 1371 页）和 Morrison 与 Cebon [8] 附录 1
+  质量矩阵 \(M\) 第 6 行（第 1626 页）。
+
 ---
 
 ## 7. 线性轮胎力
@@ -938,6 +994,9 @@ F_{2r}
 \]
 
 遗漏 \(U\phi\) 会使拖车轮胎力遗漏 \(-C_{2r}\phi\)。
+
+**文献对照：** 同样的线性轮胎和侧偏角定义见 Sharma 与 He [7] 式 (12)–(17)（第 5 页）；
+周猛等 [6] 式 (9)（第 1371 页）结构相同，但侧偏刚度取负值（该文表 1），符号约定与本文相反。
 
 ---
 
@@ -1081,6 +1140,17 @@ I_2\dot r_2
 \end{aligned}}
 \tag{D82}
 \]
+
+**文献对照：** 本章消去铰接力的三行在文献中有直接对应：
+
+- Sharma 与 He [7] 式 (5)–(7)（第 5 页）与本章只差行变换：式 (5) 即 (D74)；式 (6) 等于
+  (D79) 加 \(d_1\) 倍 (D74)，是牵引车对铰接点的力矩方程；式 (7) 等于 (D82) 加 \(a_2\) 倍 (D74)。
+  区别在于该文用牵引车横向方程 (1) 表示铰接力，本文用拖车横向方程 (D75)；
+- 周猛等 [6] 第 1371 页矩阵 \(K\)：第 3 行为两车横向方程之和；第 1 行（\(K_{11}=m_1v_{x1}c\)）
+  和第 4 行（含 \(m_2v_{x2}e\)）分别为牵引车、拖车对铰接点的横摆方程；第 6 行为铰接点约束式 (7)；
+- Morrison 与 Cebon [8] 附录 1 质量矩阵 \(M\)（第 1626 页）：第 3 行为两车横向方程之和；
+  第 1、4 行分别含 \(m_1l_{1c}u_1\) 与 \(-m_2l_{2c}u_1\)，即两车对铰接点的横摆方程；
+  第 6 行为铰接点约束。
 
 ### 8.4 收集第一行系数
 
@@ -1234,6 +1304,27 @@ m_1+m_2&-m_2d_1&-m_2a_2\\
 }
 \tag{D93}
 \]
+
+**文献对照：** Chen 与 Tomizuka [10] 第 4.1 节式 (6)–(11)（第 11 页）用 Lagrange 方程得到同一线性模型：
+式 (6) 为 \(M\ddot q+C\dot q+G\dot q+Kq=D\delta\)，式 (7) 取广义坐标 \(q=[y,\ \varepsilon,\ \varepsilon_f]\)，
+\(\varepsilon_f\) 为挂车相对牵引车的横摆角，即 \(-\phi\)（符号定义见该文附录 1，第 18 页）。
+式 (8) 的质量矩阵为
+
+\[
+M_{[10]}=
+\begin{bmatrix}
+m_1+m_2&-m_2(d_1+d_3)&-m_2d_3\\
+-m_2(d_1+d_3)&I_{z1}+I_{z2}+m_2(d_1+d_3)^2&I_{z2}+m_2d_3^2+m_2d_1d_3\\
+-m_2d_3&I_{z2}+m_2d_3^2+m_2d_1d_3&I_{z2}+m_2d_3^2
+\end{bmatrix},
+\]
+
+其中 \(d_1\)、\(d_3\) 分别对应本文 \(d_1\)、\(a_2\)。令
+\([v_{y1},\ r_1,\ r_2]^T=T[\dot y,\ \dot\varepsilon,\ \dot\varepsilon_f]^T\)，
+\(T=\begin{bmatrix}1&0&0\\0&1&0\\0&1&1\end{bmatrix}\)，可以逐项验证 \(M_{[10]}=T^TM_eT\)。
+该文式 (11) 刚度矩阵 \(K\) 的第三列为 \(2C_{\alpha t}[-1,\ l_3+d_1,\ l_3]^T\)（\(l_3\) 即本文 \(L_2\)，
+系数 2 对应每轴两侧车轮），把式 (D95) 的 \(\boldsymbol k_\phi\) 按 \(T^T\) 组合各行即得同一结果。
+Sharma 与 He [7] 附录 A 式 (A1)（第 21 页）的后三行则是按其式 (5)–(7) 组合的质量矩阵。
 
 由式 (D85)、(D88)、(D91) 得到：
 
@@ -1945,6 +2036,13 @@ A_c(6,5)=a_{24}-a_{34}.
 
 这些项描述铰接角通过拖车轮胎侧偏力反馈到整车横向动力学。
 
+**文献对照：** Chen 与 Tomizuka [10] 第 4.2 节（第 12–13 页）把式 (6) 的线性模型换到道路中心线坐标下：
+\(y_r\) 为牵引车质心相对道路中心线的横向偏差，\(\varepsilon_r\) 为牵引车相对道路的航向角，
+代换关系为式 (13)–(16)，结果为式 (17) 及状态空间形式 (23)。其道路输入 \(\dot\varepsilon_d\)
+为弯道处的期望横摆角速度（附录 1，第 18 页：弯道半径恒定时等于纵速除以半径），对应本文的
+\(U\rho\)（本文 \(\rho\) 为曲率）；式 (17) 中的 \(E\dot\varepsilon_d+F\ddot\varepsilon_d\) 与 (D140) 中的
+\(E_\rho\rho+E_{\dot\rho}\dot\rho\) 结构相同。
+
 ---
 
 ## 11. 适用边界的逐式推导
@@ -2107,6 +2205,13 @@ U\rho e_x=U\cdot(L_1\rho)\cdot\frac{e_x}{L_1}=O(\varepsilon^2)U,
 相对误差约 **17%**。缓加减速（\(|\dot U|\lesssim0.5\,\mathrm{m/s^2}\)）下可接受；
 急制动配合大铰接角时必须改用含 \(\dot U\) 的时变模型。
 
+**文献对照：** 第 5–8 章对照的线性模型都把纵速当作常参数：周猛等 [6] 第 1371 页式 (10) 前假设两车
+纵速相同，Sharma 与 He [7] 附录 A 以 \(V_x\) 为常参数，Morrison 与 Cebon [8] 第 2.1 节（第 1603 页）
+和 Chen 与 Tomizuka [10] 第 4.1 节（第 10 页）明确假设纵速恒定。含纵向动力学、不做小角度近似的模型见
+Gäfvert 与 Lindgärde [4] 第 5 节（第 10 页起）和赵晋海等 [3] 式 (1)–(12)（第 16 页）。
+变速与纵向铰接力的一致线性化（\(\dot U\phi\) 与 \(F_{hx}\sin\phi\) 必须同时计入）见
+[`4_hitch_force_free_derivation.md`](4_hitch_force_free_derivation.md) 第 9、10 节。
+
 ### 11.3 曲率率是时间导数
 
 参考线一般按弧长参数化给出 \(\kappa(s)\)，而 (D140) 需要的是 \(\rho(t)\) 的时间导数。
@@ -2139,3 +2244,49 @@ U\rho e_x=U\cdot(L_1\rho)\cdot\frac{e_x}{L_1}=O(\varepsilon^2)U,
 preview.push_back({reference.curvature,
                    currentSpeed_ * reference.curvatureDerivative});
 ```
+
+---
+
+## 参考文献
+
+以下 PDF 均保存在 [`papers/`](papers/) 目录。中文期刊和 Vehicle System Dynamics、Designs 的页码为期刊印刷页码；
+技术报告和预印本的页码为其自身页码，已在条目中注明。
+
+1. Ljungqvist O, Evestedt N, Axehill D, Cirillo M, Pettersson H. A path planning and path-following
+   control framework for a general 2-trailer with a car-like tractor. Journal of Field Robotics, 2019,
+   36(8): 1345–1377. DOI: [10.1002/rob.21908](https://doi.org/10.1002/rob.21908)。
+   文中位置按预印本 [arXiv:1904.01651v2](https://arxiv.org/abs/1904.01651) 标注；
+   本地 [`EN6_Ljungqvist_2019_General2TrailerPlanningControl.pdf`](papers/EN6_Ljungqvist_2019_General2TrailerPlanningControl.pdf)。
+2. 郑雪莲, 李显生, 王占中, 王宇宁, 王睿. 半挂汽车列车行驶稳定性问题研究. 北京理工大学学报, 2013,
+   33(增刊1): 56–60. [全文](https://journal.bit.edu.cn/zr/cn/article/pdf/preview/2013S114.pdf)；
+   本地 [`CN6_ZhengXuelian_2013_SemitrailerDrivingStability.pdf`](papers/CN6_ZhengXuelian_2013_SemitrailerDrivingStability.pdf)。
+3. 赵晋海, 武秀恒, 宋正河, 孙浩. 基于改进粒子滤波的半挂汽车列车状态估计. 湖南大学学报(自然科学版),
+   2025, 52(6): 14–23. DOI: 10.16339/j.cnki.hdxbzkb.2025172；
+   本地 [`CN5_ZhaoJinhai_2025_ImprovedParticleFilterStateEstimation.pdf`](papers/CN5_ZhaoJinhai_2025_ImprovedParticleFilterStateEstimation.pdf)。
+4. Gäfvert M, Lindgärde O. A 9-DOF tractor-semitrailer dynamic handling model for advanced chassis
+   control studies. Technical Report TFRT-7597, Department of Automatic Control, Lund Institute of
+   Technology, 2001. [LUP](https://lup.lub.lu.se/record/8602689)。期刊版：Vehicle System Dynamics,
+   2004, 41(1): 51–82, DOI: 10.1076/vesd.41.1.51.23408。文中位置按技术报告页码标注；
+   本地 [`EN2_Gafvert_2001_9DOFTractorSemitrailerHandlingModel.pdf`](papers/EN2_Gafvert_2001_9DOFTractorSemitrailerHandlingModel.pdf)。
+5. 彭涛, 关志伟, 张荣辉, 杜峰, 宗长富, 李克宁. 半挂汽车列车高速变道稳定域估计. 交通运输工程学报,
+   2018, 18(4): 90–102. DOI: 10.19818/j.cnki.1671-1637.2018.04.010；
+   本地 [`CN1_PengTao_2018_LaneChangeStabilityRegion.pdf`](papers/CN1_PengTao_2018_LaneChangeStabilityRegion.pdf)。
+6. 周猛, 宁一高, 赵轩, 王姝, 付子扬. 半挂汽车列车关键参数对动力学稳定性影响的量化分析. 汽车工程,
+   2025, 47(7): 1369–1382. DOI: 10.19562/j.chinasae.qcgc.2025.07.014；
+   本地 [`CN4_ZhouMeng_2025_KeyParametersDynamicStability.pdf`](papers/CN4_ZhouMeng_2025_KeyParametersDynamicStability.pdf)。
+7. Sharma T, He Y. On trade-off relationship between static and dynamic lateral stabilities of
+   articulated heavy vehicles. Designs, 2024, 8(5): 103. DOI:
+   [10.3390/designs8050103](https://doi.org/10.3390/designs8050103)；
+   本地 [`EN4_Sharma_2024_StaticDynamicLateralStabilityTradeoff.pdf`](papers/EN4_Sharma_2024_StaticDynamicLateralStabilityTradeoff.pdf)。
+8. Morrison G, Cebon D. Sideslip estimation for articulated heavy vehicles at the limits of adhesion.
+   Vehicle System Dynamics, 2016, 54(11): 1601–1628. DOI:
+   [10.1080/00423114.2016.1223326](https://doi.org/10.1080/00423114.2016.1223326)；
+   本地 [`EN3_Morrison_2016_SideslipEstimationArticulatedHGV.pdf`](papers/EN3_Morrison_2016_SideslipEstimationArticulatedHGV.pdf)。
+9. 李道飞, 查安飞, 徐彪, 张家杰. 半挂汽车列车紧急避撞轨迹跟踪控制算法. 汽车工程, 2022, 44(7):
+   1098–1106. DOI: 10.19562/j.chinasae.qcgc.2022.07.016；
+   本地 [`CN3_LiDaofei_2022_EmergencyAvoidanceTrajectoryTracking.pdf`](papers/CN3_LiDaofei_2022_EmergencyAvoidanceTrajectoryTracking.pdf)。
+10. Chen C, Tomizuka M. Dynamic modeling of tractor-semitrailer vehicles in automated highway systems.
+    California PATH Working Paper UCB-ITS-PWP-95-8, University of California, Berkeley, 1995.
+    [eScholarship](https://escholarship.org/uc/item/4cd4x08c)。会议版：Proceedings of the American
+    Control Conference, 1995: 653–657, DOI: 10.1109/ACC.1995.529331。文中位置按报告页码标注；
+    本地 [`EN1_Chen_1995_DynamicModelingTractorSemitrailerAHS.pdf`](papers/EN1_Chen_1995_DynamicModelingTractorSemitrailerAHS.pdf)。
