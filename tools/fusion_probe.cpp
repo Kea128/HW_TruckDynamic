@@ -12,11 +12,22 @@ struct Score {
     double phiRmse{};
     double rateRmse{};
     double rawRmse{};
+    std::size_t delivered{};
+    std::size_t accepted{};
+    std::size_t gated{};
+    // Neither accepted nor gated. With the demo's validated window and unique,
+    // input-covered stamps this can only be outOfOrder.
+    std::size_t dropped{};
 };
 
-Score run(truck_model::ArticulationProcessModel model, double lidarNoiseStd) {
+Score run(truck_model::ArticulationProcessModel model,
+          double lidarNoiseStd,
+          const truck_model::ArticulationNoiseDensities* densities = nullptr) {
     auto settings = truck_demo::DemoSession::fusionComparisonSettings();
     settings.articulationEstimator.processModel = model;
+    if (densities != nullptr) {
+        settings.articulationEstimator.noiseDensity = *densities;
+    }
     settings.shadowEstimatorEnabled = false;
     settings.mpcUsesFusedArticulation = false;
     settings.lidarNoiseStd = lidarNoiseStd;
@@ -37,7 +48,12 @@ Score run(truck_model::ArticulationProcessModel model, double lidarNoiseStd) {
     double rawSse = 0.0;
     std::size_t scored = 0;
     std::size_t rawScored = 0;
+    Score out;
     for (const auto& s : session.history()) {
+        out.delivered += s.lidarDeliveredCount;
+        out.accepted += s.lidarAcceptedCount;
+        out.gated += s.lidarGatedCount;
+        out.dropped += s.lidarDroppedCount;
         if (s.time < 1.0) {
             continue;
         }
@@ -53,7 +69,6 @@ Score run(truck_model::ArticulationProcessModel model, double lidarNoiseStd) {
             ++rawScored;
         }
     }
-    Score out;
     out.phiRmse = std::sqrt(phiSse / static_cast<double>(scored));
     out.rateRmse = std::sqrt(rateSse / static_cast<double>(scored));
     out.rawRmse =
@@ -118,8 +133,9 @@ Amplitudes track(bool fusion,
 // model? Sweep it and watch both channels, since raising it trades phi noise
 // for phi-dot responsiveness.
 void sweepTrailerBiasDensity() {
-    // 2.56e-2 is what the OU match (F7a) actually gives for sigma_b = 0.063
-    // rad/s and tau_b = 0.31 s; it is swept so the doc can report it.
+    // 2.56e-2 is the figure the OU match (F7a) gave before its operating
+    // points were unified; it stays in the sweep as an order-of-magnitude
+    // point above the useful range.
     const double values[] = {2.0e-5, 1.0e-4, 2.0e-4, 1.0e-3,
                              5.0e-3, 2.56e-2, 5.0e-2};
     std::printf("\nq_b [rad^2/s^3]   phi[deg]   phidot[deg/s]\n");
@@ -166,9 +182,9 @@ void sweepTrailerBiasDensity() {
 }  // namespace
 
 int main() {
-    // 0.5 deg is the demo's nominal scan; 4 deg is what the README quotes for
-    // real perception. Both are reported so docs/3 cannot show only the
-    // flattering one.
+    // 0.5 deg is the demo's nominal scan; 4 deg is an engineering comparison
+    // level the README mentions for simulation, not a calibrated perception
+    // figure. Both are reported so docs/3 cannot show only the flattering one.
     for (const double noiseDegrees : {0.5, 2.0, 4.0}) {
         const double sigma = noiseDegrees / kDeg;
         const auto k = run(truck_model::ArticulationProcessModel::kinematic,
@@ -182,6 +198,36 @@ int main() {
         std::printf("dynamic      %8.3f  %13.3f\n", d.phiRmse * kDeg,
                     d.rateRmse * kDeg);
         std::printf("raw lidar    %8.3f  %13s\n", k.rawRmse * kDeg, "n/a");
+        for (const auto* s : {&k, &d}) {
+            const double n = static_cast<double>(s->delivered);
+            std::printf(
+                "%-10s   delivered %4zu  accepted %5.1f%%  gated %4.1f%%  "
+                "dropped(outOfOrder) %4.1f%%\n",
+                s == &k ? "kinematic" : "dynamic",
+                s->delivered,
+                100.0 * static_cast<double>(s->accepted) / n,
+                100.0 * static_cast<double>(s->gated) / n,
+                100.0 * static_cast<double>(s->dropped) / n);
+        }
+    }
+
+    // The dynamic-model densities: defaults versus the 2 sigma^2 tau_c values
+    // their rationale gives.
+    std::printf("\ndynamic densities (q_vy1, q_r2)   noise  phi[deg]  phidot[deg/s]\n");
+    for (const double noiseDegrees : {0.5, 4.0}) {
+        truck_model::ArticulationNoiseDensities rationale;
+        rationale.truckLateralVelocity = 0.036;
+        rationale.trailerYawRate = 1.2e-4;
+        const auto nominal = run(truck_model::ArticulationProcessModel::dynamic,
+                                 noiseDegrees / kDeg);
+        const auto derived = run(truck_model::ArticulationProcessModel::dynamic,
+                                 noiseDegrees / kDeg, &rationale);
+        std::printf("default  (0.05, 1.5e-4)          %4.1f   %7.3f  %13.3f\n",
+                    noiseDegrees, nominal.phiRmse * kDeg,
+                    nominal.rateRmse * kDeg);
+        std::printf("2s^2tau  (0.036, 1.2e-4)         %4.1f   %7.3f  %13.3f\n",
+                    noiseDegrees, derived.phiRmse * kDeg,
+                    derived.rateRmse * kDeg);
     }
 
     using PM = truck_model::ArticulationProcessModel;

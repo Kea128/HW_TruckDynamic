@@ -527,6 +527,7 @@ void testOutOfOrderDeliveryStillTracks() {
     session.start();
 
     std::size_t outOfOrder = 0;
+    std::size_t dropped = 0;
     double previousStamp = -1.0;
     double estimateSse = 0.0;
     int scored = 0;
@@ -536,6 +537,7 @@ void testOutOfOrderDeliveryStillTracks() {
             continue;
         }
         const auto& latest = session.history().back();
+        dropped += latest.lidarDroppedCount;
         if (latest.lidarDeliveredCount > 0) {
             if (previousStamp >= 0.0 && latest.lidarStamp < previousStamp) {
                 ++outOfOrder;
@@ -557,6 +559,9 @@ void testOutOfOrderDeliveryStillTracks() {
     require(
         outOfOrder > 0,
         "a 0.1-0.5 s latency spread must produce out-of-order arrivals");
+    // The window covers the latency, so the only way to drop a scan here is to
+    // refuse it as out of order.
+    require(dropped > 0, "overtaken scans must be refused, not fused late");
     require(scored > 20, "out-of-order run produced too little telemetry");
     const double rmse = std::sqrt(estimateSse / scored);
     require(rmse < 0.05, "out-of-order arrivals broke articulation tracking");

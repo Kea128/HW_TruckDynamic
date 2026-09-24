@@ -27,9 +27,29 @@ void expectNear(double actual, double expected, const char* message) {
     }
 }
 
+void expectRelative(
+    double actual,
+    double expected,
+    double tolerance,
+    const char* message) {
+    if (std::abs(actual - expected) >
+        tolerance * std::max(std::abs(expected), 1.0e-300)) {
+        std::cerr << message << ": expected " << expected << ", got " << actual
+                  << '\n';
+        std::exit(EXIT_FAILURE);
+    }
+}
+
 void expectFinite(double value, const char* message) {
     if (!std::isfinite(value)) {
         std::cerr << message << ": value is not finite\n";
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+void require(bool condition, const char* message) {
+    if (!condition) {
+        std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
@@ -383,66 +403,91 @@ void testKinematicTrailerYawRateMatchesK5() {
         "off-axle K5 trailer yaw rate");
 }
 
+// The truth carries a trailer yaw residual the filter has to learn, and the
+// filter starts from the wrong angle, so an open-loop prediction cannot pass:
+// the 200 ms late scans have to do the work.
 void testDelayedEkfCompensatesLidarLatency() {
     const auto p = parameters();
     truck_model::ArticulationEstimator estimator(p);
+    truck_model::ArticulationEstimator openLoop(p);
     const double dt = 0.02;
     const double speed = 12.0;
-    const double r1 = 0.08;
-    double truth = 0.15;
-    estimator.reset(0.0, truth);
+    const double residual = 0.03;
+    constexpr int steps = 250;
+    constexpr int latencySteps = 10;
+    // A time-varying yaw rate keeps the articulation moving, so a 200 ms old
+    // scan stays measurably wrong instead of converging onto a constant.
+    const auto yawRate = [dt](int step) {
+        return 0.08 + 0.06 * std::sin(2.0 * 3.14159265358979323846 * 0.5 * dt *
+                                      static_cast<double>(step));
+    };
+
+    std::vector<double> truth(steps + 1);
+    truth[0] = 0.15;
+    for (int step = 1; step <= steps; ++step) {
+        const double r1 = yawRate(step);
+        const double r2 =
+            truck_model::kinematicTrailerYawRate(p, speed, r1, truth[step - 1]) +
+            residual;
+        truth[step] = wrapAngle(truth[step - 1] + dt * (r1 - r2));
+    }
+    estimator.reset(0.0, 0.05);
+    openLoop.reset(0.0, 0.05);
 
     double estimateSse = 0.0;
+    double openLoopSse = 0.0;
     double delayedSse = 0.0;
     int scoreCount = 0;
-    double lastDelivered = truth;
-    for (int step = 1; step <= 150; ++step) {
+    double lastDelivered = truth[0];
+    for (int step = 1; step <= steps; ++step) {
         const double time = dt * static_cast<double>(step);
-        const double r2 =
-            truck_model::kinematicTrailerYawRate(p, speed, r1, truth);
-        truth = wrapAngle(truth + dt * (r1 - r2));
-
         truck_model::ArticulationInputs inputs;
         inputs.time = time;
-        inputs.truckYawRate = r1;
+        inputs.truckYawRate = yawRate(step);
         inputs.speed = speed;
         estimator.predict(inputs);
+        openLoop.predict(inputs);
 
-        if (step % 5 == 0) {
-            const double stamp = time - 0.20;
-            if (stamp >= 0.0) {
-                double delayedTruth = 0.15;
-                for (int past = 1; past <= step - 10; ++past) {
-                    const double pastR2 =
-                        truck_model::kinematicTrailerYawRate(
-                            p, speed, r1, delayedTruth);
-                    delayedTruth = wrapAngle(
-                        delayedTruth + dt * (r1 - pastR2));
-                }
-                lastDelivered = delayedTruth;
-                truck_model::ArticulationLidarMeasurement measurement;
-                measurement.stamp = stamp;
-                measurement.articulation = delayedTruth;
-                estimator.updateLidar(measurement);
-            }
+        if (step % 5 == 0 && step >= latencySteps) {
+            truck_model::ArticulationLidarMeasurement measurement;
+            measurement.stamp = dt * static_cast<double>(step - latencySteps);
+            measurement.articulation = truth[step - latencySteps];
+            lastDelivered = measurement.articulation;
+            const double before = estimator.estimate().articulation;
+            const auto report = estimator.updateLidar(measurement);
+            require(report.measurementAccepted, "latency scan must be accepted");
+            require(
+                report.repropagatedFrames >= latencySteps,
+                "a 200 ms late scan must replay the frames after its stamp");
+            require(
+                (report.articulation - before) * report.innovation > 0.0,
+                "the current estimate must move toward the late measurement");
         }
 
-        if (time >= 0.6) {
-            const double estimateError = wrapAngle(
-                estimator.estimate().articulation - truth);
-            const double delayedError = wrapAngle(lastDelivered - truth);
+        if (time >= 1.0) {
+            const double estimateError =
+                wrapAngle(estimator.estimate().articulation - truth[step]);
+            const double openLoopError =
+                wrapAngle(openLoop.estimate().articulation - truth[step]);
+            const double delayedError = wrapAngle(lastDelivered - truth[step]);
             estimateSse += estimateError * estimateError;
+            openLoopSse += openLoopError * openLoopError;
             delayedSse += delayedError * delayedError;
             ++scoreCount;
         }
     }
 
     const double estimateRmse = std::sqrt(estimateSse / scoreCount);
+    const double openLoopRmse = std::sqrt(openLoopSse / scoreCount);
     const double delayedRmse = std::sqrt(delayedSse / scoreCount);
-    if (estimateRmse > 0.015 || estimateRmse > 0.35 * delayedRmse) {
+    // Measured: 0.0039 / 0.0105 / 0.0153 rad. Dropping the update leaves the
+    // open-loop error; fusing late scans as current leaves the delayed error.
+    if (estimateRmse > 0.008 || estimateRmse > 0.5 * delayedRmse ||
+        estimateRmse > 0.4 * openLoopRmse) {
         std::cerr << "delayed EKF did not recover current articulation: "
                   << "estimate RMSE=" << estimateRmse
-                  << " delayed RMSE=" << delayedRmse << '\n';
+                  << " delayed RMSE=" << delayedRmse
+                  << " open-loop RMSE=" << openLoopRmse << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
@@ -497,25 +542,22 @@ void testEstimatorCoastsAfterDropout() {
 }
 
 void testEstimatorRejectsInvalidConfig() {
-    auto config = truck_model::ArticulationEstimatorConfig{};
-    config.historyHorizon = 0.0;
-    bool rejected = false;
-    try {
-        truck_model::ArticulationEstimator estimator(parameters(), config);
-    } catch (const std::invalid_argument&) {
-        rejected = true;
-    }
-    if (!rejected) {
+    const auto rejects = [](const truck_model::ArticulationEstimatorConfig& config) {
+        try {
+            truck_model::ArticulationEstimator estimator(parameters(), config);
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    auto horizon = truck_model::ArticulationEstimatorConfig{};
+    horizon.historyHorizon = 0.0;
+    auto scale = truck_model::ArticulationEstimatorConfig{};
+    scale.coastingProcessNoiseScale = 0.5;
+    auto frames = truck_model::ArticulationEstimatorConfig{};
+    frames.maximumFrames = 1;
+    if (!rejects(horizon) || !rejects(scale) || !rejects(frames)) {
         std::cerr << "invalid estimator config must be rejected\n";
-        std::exit(EXIT_FAILURE);
-    }
-}
-
-// --- Delayed EKF v2 ---------------------------------------------------------
-
-void require(bool condition, const char* message) {
-    if (!condition) {
-        std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
@@ -534,22 +576,29 @@ void testVanLoanMatchesAnalyticRandomWalk() {
     const auto discrete =
         truck_model::discretizeVanLoan(continuous, density, dt);
 
-    expectNear(discrete.transition[0][0], 1.0, "van Loan transition 00");
-    expectNear(discrete.transition[0][1], -dt, "van Loan transition 01");
-    expectNear(discrete.transition[1][1], 1.0, "van Loan transition 11");
-    expectNear(
+    // Relative tolerances: the entries span four decades, so an absolute band
+    // wide enough for Q11 would accept a wrong coefficient in Q00.
+    constexpr double tight = 1.0e-10;
+    expectRelative(discrete.transition[0][0], 1.0, tight, "van Loan transition 00");
+    expectRelative(discrete.transition[0][1], -dt, tight, "van Loan transition 01");
+    expectRelative(discrete.transition[1][1], 1.0, tight, "van Loan transition 11");
+    expectRelative(
         discrete.processNoise[0][0],
         q * dt * dt * dt / 3.0,
+        tight,
         "van Loan integrated bias variance");
-    expectNear(
+    expectRelative(
         discrete.processNoise[0][1],
         -0.5 * q * dt * dt,
+        tight,
         "van Loan cross covariance");
-    expectNear(
+    expectRelative(
         discrete.processNoise[1][0],
         -0.5 * q * dt * dt,
+        tight,
         "van Loan cross covariance symmetry");
-    expectNear(discrete.processNoise[1][1], q * dt, "van Loan bias variance");
+    expectRelative(
+        discrete.processNoise[1][1], q * dt, tight, "van Loan bias variance");
 
     // The cross term is what a diagonal Euler approximation throws away.
     require(
@@ -578,9 +627,10 @@ void testProcessNoiseIsStepInvariant() {
     for (std::size_t row = 0; row < 2; ++row) {
         for (std::size_t column = 0; column < 2; ++column) {
             composed[row][column] += second.processNoise[row][column];
-            expectNear(
+            expectRelative(
                 composed[row][column],
                 whole.processNoise[row][column],
+                1.0e-10,
                 "split-step process noise must compose");
         }
     }
@@ -971,6 +1021,8 @@ void testSubFrameAlignmentIsExact() {
             inputs.speed = 12.0;
             estimator.predict(inputs);
         }
+        const std::size_t framesBefore = estimator.estimate().historySize;
+        const double before = estimator.estimate().articulation;
         truck_model::ArticulationLidarMeasurement measurement;
         measurement.stamp = 0.50 + phase;
         measurement.articulation = 0.05;
@@ -982,7 +1034,513 @@ void testSubFrameAlignmentIsExact() {
             report.alignedStamp,
             measurement.stamp,
             "sub-frame scan must align to its own stamp, not a stored frame");
+        require(
+            report.historySize == framesBefore + 1 &&
+                report.repropagatedFrames > 0,
+            "an accepted sub-frame scan must add its frame and replay forward");
+        require(
+            (report.articulation - before) * report.innovation > 1.0e-6,
+            "the current estimate must be corrected toward the scan");
     }
+}
+
+constexpr double kPi = 3.14159265358979323846;
+
+truck_model::ArticulationInputs steadyInputs(
+    double time,
+    double truckYawRate,
+    double speed,
+    double steering = 0.0) {
+    truck_model::ArticulationInputs inputs;
+    inputs.time = time;
+    inputs.truckYawRate = truckYawRate;
+    inputs.speed = speed;
+    inputs.steering = steering;
+    return inputs;
+}
+
+// A filter that was never reset has no state to predict from, and inventing
+// one would publish a plausible-looking estimate.
+void testPredictBeforeResetThrows() {
+    truck_model::ArticulationEstimator estimator(parameters());
+    bool rejected = false;
+    try {
+        estimator.predict(steadyInputs(0.05, 0.0, 10.0));
+    } catch (const std::invalid_argument&) {
+        rejected = false;
+    } catch (const std::logic_error&) {
+        rejected = true;
+    }
+    require(rejected, "predict before reset must throw std::logic_error");
+    require(
+        !estimator.initialized(),
+        "a refused predict must not initialize the filter");
+}
+
+void testResetRejectsInvalidCovariance() {
+    using Shell =
+        truck_model::DelayedEkf<truck_model::KinematicArticulationModel>;
+    const truck_model::KinematicArticulationModel model(
+        parameters(), truck_model::ArticulationEstimatorConfig{});
+    const truck_model::Vector<2> state{0.0, 0.0};
+    truck_model::Matrix<2, 2> asymmetric{};
+    asymmetric[0][0] = 1.0e-3;
+    asymmetric[1][1] = 1.0e-3;
+    asymmetric[0][1] = 1.0e-4;
+    truck_model::Matrix<2, 2> negative{};
+    negative[0][0] = -1.0e-3;
+    negative[1][1] = 1.0e-3;
+    for (const auto& covariance : {asymmetric, negative}) {
+        Shell shell;
+        shell.configure(model, truck_model::DelayedEkfLimits{});
+        bool rejected = false;
+        try {
+            shell.reset(
+                0.0, state, covariance, truck_model::ArticulationInputs{});
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        require(
+            rejected,
+            "an asymmetric or negative reset covariance must be refused");
+    }
+}
+
+// Input time is the filter clock; letting it run backwards would rewrite a
+// propagated frame or publish an estimate older than the state behind it.
+void testOlderInputThrows() {
+    truck_model::ArticulationEstimator estimator(parameters());
+    estimator.reset(0.0, 0.0);
+    estimator.predict(steadyInputs(0.10, 0.02, 10.0));
+    const double timeBefore = estimator.estimate().time;
+    bool rejected = false;
+    try {
+        estimator.predict(steadyInputs(0.05, 0.02, 10.0));
+    } catch (const std::invalid_argument&) {
+        rejected = true;
+    }
+    require(rejected, "an input older than the newest frame must be refused");
+    require(
+        estimator.estimate().time == timeBefore,
+        "a refused input must not move the published time");
+}
+
+// A second sample at the same instant (the demo sends one when it rebuilds the
+// controller) may refresh the published rate but not the stored history, or a
+// later replay would use an input the forward pass never saw.
+void testSameTimePredictKeepsHistory() {
+    const auto p = parameters();
+    for (const auto model : {truck_model::ArticulationProcessModel::kinematic,
+                             truck_model::ArticulationProcessModel::dynamic}) {
+        truck_model::ArticulationEstimatorConfig config;
+        config.processModel = model;
+        truck_model::ArticulationEstimator refreshed(p, config);
+        truck_model::ArticulationEstimator plain(p, config);
+        refreshed.reset(0.0, 0.02);
+        plain.reset(0.0, 0.02);
+        for (int step = 1; step <= 10; ++step) {
+            const auto inputs = steadyInputs(
+                0.05 * static_cast<double>(step), 0.05, 12.0, 0.01);
+            refreshed.predict(inputs);
+            plain.predict(inputs);
+            if (step == 5) {
+                const auto after = refreshed.predict(
+                    steadyInputs(inputs.time, 0.20, 14.0, 0.05));
+                require(
+                    after.articulation == plain.estimate().articulation &&
+                        after.covariancePhi == plain.estimate().covariancePhi,
+                    "a same-time sample must not touch the state");
+                require(
+                    std::abs(
+                        after.articulationRate -
+                        plain.estimate().articulationRate) > 1.0e-3,
+                    "the published rate must use the refreshed sample");
+            }
+        }
+        // 0.235 s lies inside the interval whose input was refreshed.
+        truck_model::ArticulationLidarMeasurement late;
+        late.stamp = 0.235;
+        late.articulation = 0.03;
+        const auto a = refreshed.updateLidar(late);
+        const auto b = plain.updateLidar(late);
+        require(
+            a.measurementAccepted && b.measurementAccepted,
+            "the late scan must be accepted");
+        require(
+            a.articulation == b.articulation &&
+                a.covariancePhi == b.covariancePhi,
+            "the replay must use the input the forward pass used");
+    }
+}
+
+// After a time jump trim() keeps the two newest frames, so the oldest frame
+// alone would admit a stamp far older than historyHorizon.
+void testHardWindowAfterTimeJump() {
+    truck_model::ArticulationEstimator estimator(parameters());
+    estimator.reset(0.0, 0.0);
+    estimator.predict(steadyInputs(0.05, 0.02, 10.0));
+    estimator.predict(steadyInputs(5.0, 0.02, 10.0));
+    require(
+        estimator.estimate().historySize == 2,
+        "a time jump leaves the two newest frames");
+    truck_model::ArticulationLidarMeasurement old;
+    old.stamp = 0.06;
+    old.articulation = 0.0;
+    require(
+        estimator.updateLidar(old).outcome ==
+            truck_model::MeasurementOutcome::staleBeyondWindow,
+        "a stamp older than historyHorizon must be stale even inside the "
+        "stored span");
+}
+
+// A gated scan must leave nothing behind. The gate is evaluated on a detached
+// split frame, so the history, and every later replay, is exactly what it
+// would have been had the scan never arrived.
+void testGatedSubFrameScanLeavesHistoryUntouched() {
+    const auto p = parameters();
+    for (const auto model : {truck_model::ArticulationProcessModel::kinematic,
+                             truck_model::ArticulationProcessModel::dynamic}) {
+        const auto run = [&p, model](bool withOutlier) {
+            truck_model::ArticulationEstimatorConfig config;
+            config.processModel = model;
+            config.historyHorizon = 1.0;
+            truck_model::ArticulationEstimator estimator(p, config);
+            estimator.reset(0.0, 0.0);
+            for (int step = 1; step <= 10; ++step) {
+                estimator.predict(steadyInputs(
+                    0.05 * static_cast<double>(step), 0.06, 12.0, 0.01));
+            }
+            if (withOutlier) {
+                const auto before = estimator.estimate();
+                truck_model::ArticulationLidarMeasurement outlier;
+                outlier.stamp = 0.325;
+                outlier.articulation = 0.8;
+                const auto report = estimator.updateLidar(outlier);
+                require(report.measurementGated, "the outlier must be gated");
+                require(
+                    report.historySize == before.historySize,
+                    "a gated sub-frame scan must not add a frame");
+                require(
+                    report.articulation == before.articulation &&
+                        report.covariancePhi == before.covariancePhi,
+                    "a gated scan must not move the state");
+            }
+            truck_model::ArticulationLidarMeasurement good;
+            good.stamp = 0.335;
+            good.articulation = 0.03;
+            const auto report = estimator.updateLidar(good);
+            require(
+                report.measurementAccepted, "the good scan must be accepted");
+            return report;
+        };
+        const auto clean = run(false);
+        const auto dirty = run(true);
+        require(
+            clean.historySize == dirty.historySize &&
+                clean.articulation == dirty.articulation &&
+                clean.covariancePhi == dirty.covariancePhi,
+            "a gated scan must not change what a later update produces");
+    }
+}
+
+void testUpdateRespectsMaximumFrames() {
+    truck_model::ArticulationEstimatorConfig config;
+    config.maximumFrames = 4;
+    config.historyHorizon = 2.0;
+    truck_model::ArticulationEstimator estimator(parameters(), config);
+    estimator.reset(0.0, 0.0);
+    for (int step = 1; step <= 3; ++step) {
+        estimator.predict(
+            steadyInputs(0.05 * static_cast<double>(step), 0.0, 10.0));
+    }
+    require(estimator.estimate().historySize == 4, "setup must fill the cap");
+    for (const double stamp : {0.12, 0.13, 0.14}) {
+        truck_model::ArticulationLidarMeasurement measurement;
+        measurement.stamp = stamp;
+        measurement.articulation = 0.0;
+        const auto report = estimator.updateLidar(measurement);
+        require(report.measurementAccepted, "in-window scan must be accepted");
+        require(
+            report.historySize <= 4,
+            "a frame inserted by update must respect maximumFrames");
+    }
+}
+
+// The coasting flag reports the open-loop condition itself, so it must not
+// depend on whether the inflation factor happens to be above one.
+void testCoastingFlagWithUnitNoiseScale() {
+    truck_model::ArticulationEstimatorConfig config;
+    config.coastingProcessNoiseScale = 1.0;
+    config.lostTimeout = 0.2;
+    truck_model::ArticulationEstimator estimator(parameters(), config);
+    estimator.reset(0.0, 0.0);
+    for (int step = 1; step <= 10; ++step) {
+        estimator.predict(
+            steadyInputs(0.05 * static_cast<double>(step), 0.02, 10.0));
+    }
+    require(
+        estimator.estimate().coasting,
+        "coasting must be reported even when the inflation factor is 1");
+    require(
+        !estimator.estimate().hasAcceptedMeasurement,
+        "no scan has been accepted yet");
+}
+
+bool closeRelative(double actual, double expected, double tolerance) {
+    return std::abs(actual - expected) <=
+           tolerance * std::max(std::abs(actual), std::abs(expected)) +
+               1.0e-300;
+}
+
+// Delayed fusion must reproduce, operation for operation, the EKF that fuses
+// every scan the moment it is taken, on the input grid refined by the scan
+// stamps. The run crosses speed buckets, mixes on-grid and between-frame
+// stamps, and sends same-time input samples the history must ignore.
+template <typename Model>
+void checkDelayedFusionEqualsOnTime(
+    const Model& model,
+    const truck_model::Vector<Model::kStateSize>& initialState,
+    const truck_model::Matrix<Model::kStateSize, Model::kStateSize>&
+        initialCovariance,
+    std::size_t phiIndex) {
+    constexpr std::size_t n = Model::kStateSize;
+    constexpr double dt = 0.05;
+    constexpr int steps = 80;
+    truck_model::DelayedEkfLimits limits;
+    limits.historyHorizon = 0.6;
+    truck_model::DelayedEkf<Model> delayed;
+    truck_model::DelayedEkf<Model> onTime;
+    delayed.configure(model, limits);
+    onTime.configure(model, limits);
+    delayed.reset(
+        0.0, initialState, initialCovariance, truck_model::ArticulationInputs{});
+    onTime.reset(
+        0.0, initialState, initialCovariance, truck_model::ArticulationInputs{});
+
+    const auto inputsAt = [](int k) {
+        const double t = dt * static_cast<double>(k);
+        return steadyInputs(
+            t,
+            0.08 * std::sin(2.0 * kPi * 0.4 * t),
+            10.0 + 2.0 * static_cast<double>(k) / steps,
+            0.03 * std::sin(2.0 * kPi * 0.4 * t + 0.3));
+    };
+
+    struct Scan {
+        double stamp{};
+        double arrival{};
+        double value{};
+    };
+    std::vector<Scan> scans;
+    double lastArrival = 0.0;
+    const double phases[3] = {0.037, 0.013, 0.071};
+    for (int j = 0; 0.1 * j + 0.6 < dt * steps; ++j) {
+        Scan scan;
+        scan.stamp = j % 4 == 1 ? dt * static_cast<double>(2 * j + 1)
+                                : 0.1 * j + phases[j % 3];
+        const double latency = 0.12 + 0.17 * std::fmod(0.618034 * j, 1.0);
+        scan.arrival = std::max(scan.stamp + latency, lastArrival);
+        lastArrival = scan.arrival;
+        scans.push_back(scan);
+    }
+
+    std::size_t next = 0;
+    for (int k = 1; k <= steps; ++k) {
+        const auto u = inputsAt(k);
+        while (next < scans.size() && scans[next].stamp <= u.time + 1.0e-12) {
+            Scan& scan = scans[next];
+            onTime.predict(u, std::min(scan.stamp, u.time));
+            // The reference prior defines the value, so every innovation is
+            // known, non-zero and inside the gate.
+            scan.value =
+                onTime.state()[phiIndex] + 0.01 * std::sin(7.0 * scan.stamp);
+            require(
+                onTime.update(scan.stamp, scan.value).outcome ==
+                    truck_model::MeasurementOutcome::accepted,
+                "reference scan must be accepted");
+            ++next;
+        }
+        onTime.predict(u, u.time);
+    }
+
+    std::size_t delivered = 0;
+    for (int k = 1; k <= steps; ++k) {
+        const auto u = inputsAt(k);
+        delayed.predict(u, u.time);
+        if (k % 7 == 0) {
+            delayed.predict(
+                steadyInputs(
+                    u.time,
+                    u.truckYawRate + 0.1,
+                    u.speed + 0.5,
+                    u.steering - 0.02),
+                u.time);
+        }
+        while (delivered < scans.size() &&
+               scans[delivered].arrival <= u.time + 1.0e-12) {
+            const Scan& scan = scans[delivered];
+            const auto report = delayed.update(scan.stamp, scan.value);
+            require(
+                report.outcome == truck_model::MeasurementOutcome::accepted,
+                "delayed scan must be accepted");
+            require(
+                std::abs(report.alignedStamp - scan.stamp) <= 1.0e-12,
+                "delayed scan must land on its own stamp");
+            require(
+                report.repropagatedFrames > 0, "a late scan must be replayed");
+            ++delivered;
+        }
+    }
+    require(delivered == scans.size(), "every scan must arrive before the end");
+    require(delayed.time() == onTime.time(), "both filters must end together");
+    for (std::size_t row = 0; row < n; ++row) {
+        require(
+            closeRelative(delayed.state()[row], onTime.state()[row], 1.0e-12),
+            "delayed fusion must equal on-time fusion: state");
+        for (std::size_t column = 0; column < n; ++column) {
+            require(
+                closeRelative(
+                    delayed.covariance()[row][column],
+                    onTime.covariance()[row][column],
+                    1.0e-12),
+                "delayed fusion must equal on-time fusion: covariance");
+        }
+    }
+}
+
+void testDelayedFusionEqualsOnTimeFusion() {
+    const auto p = parameters();
+    const truck_model::ArticulationEstimatorConfig config;
+
+    truck_model::Matrix<2, 2> kinematicCovariance{};
+    kinematicCovariance[0][0] = config.initialArticulationVariance;
+    kinematicCovariance[1][1] = config.initialTrailerYawBiasVariance;
+    checkDelayedFusionEqualsOnTime(
+        truck_model::KinematicArticulationModel(p, config),
+        truck_model::Vector<2>{0.02, 0.0},
+        kinematicCovariance,
+        0);
+
+    truck_model::Matrix<3, 3> dynamicCovariance{};
+    dynamicCovariance[0][0] = config.initialTruckLateralVelocityVariance;
+    dynamicCovariance[1][1] = config.initialTrailerYawRateVariance;
+    dynamicCovariance[2][2] = config.initialArticulationVariance;
+    checkDelayedFusionEqualsOnTime(
+        truck_model::DynamicArticulationModel(p, config),
+        truck_model::Vector<3>{0.0, 0.0, 0.02},
+        dynamicCovariance,
+        2);
+
+    // Against the unrefined grid: the linear ZOH model composes exactly, so
+    // splitting an interval changes nothing; the Euler kinematic mean does not.
+    const auto u = steadyInputs(0.0, 0.07, 11.3, 0.02);
+    const truck_model::DynamicArticulationModel dynamic(p, config);
+    truck_model::Vector<3> xWhole{0.12, 0.03, 0.05};
+    truck_model::Matrix<3, 3> pWhole = dynamicCovariance;
+    pWhole[1][2] = -2.0e-4;
+    pWhole[2][1] = -2.0e-4;
+    auto xSplit = xWhole;
+    auto pSplit = pWhole;
+    dynamic.propagate(xWhole, pWhole, u, 0.05, 1.0);
+    dynamic.propagate(xSplit, pSplit, u, 0.02, 1.0);
+    dynamic.propagate(xSplit, pSplit, u, 0.03, 1.0);
+    for (std::size_t row = 0; row < 3; ++row) {
+        require(
+            closeRelative(xSplit[row], xWhole[row], 1.0e-10),
+            "a split dynamic interval must reproduce the whole one: state");
+        for (std::size_t column = 0; column < 3; ++column) {
+            require(
+                std::abs(pSplit[row][column] - pWhole[row][column]) <=
+                    1.0e-10 * std::abs(pWhole[row][column]) + 1.0e-16,
+                "a split dynamic interval must reproduce the whole one: P");
+        }
+    }
+
+    const truck_model::KinematicArticulationModel kinematic(p, config);
+    truck_model::Vector<2> kWhole{0.1, 0.01};
+    truck_model::Matrix<2, 2> kpWhole = kinematicCovariance;
+    auto kSplit = kWhole;
+    auto kpSplit = kpWhole;
+    kinematic.propagate(kWhole, kpWhole, u, 0.05, 1.0);
+    kinematic.propagate(kSplit, kpSplit, u, 0.02, 1.0);
+    kinematic.propagate(kSplit, kpSplit, u, 0.03, 1.0);
+    const double eulerGap = std::abs(kSplit[0] - kWhole[0]);
+    require(
+        eulerGap > 1.0e-9 && eulerGap < 1.0e-3,
+        "a split kinematic interval differs from the whole one by O(dt^2)");
+}
+
+// The speed bucket is part of the replay contract, so the rounding rule is too:
+// an exact midpoint rounds away from zero, as std::round does.
+void testScheduledSpeedQuantization() {
+    const truck_model::ArticulationEstimatorConfig config;
+    require(
+        truck_model::scheduledModelSpeed(10.125, config) == 10.25,
+        "a midpoint between buckets must round away from zero");
+    require(
+        truck_model::scheduledModelSpeed(10.124, config) == 10.0,
+        "just below the midpoint must round down");
+    require(
+        truck_model::scheduledModelSpeed(15.0, config) == 15.0,
+        "an on-bucket speed must be kept");
+    require(
+        truck_model::scheduledModelSpeed(0.2, config) ==
+                config.minimumModelSpeed &&
+            truck_model::scheduledModelSpeed(-3.0, config) ==
+                config.minimumModelSpeed,
+        "low and reverse speeds must be scheduled at minimumModelSpeed");
+}
+
+// With this repository's axle loads the truck rear axle slips 1.74 times more
+// than the trailer axle in a steady turn, so the trailer yaw residual opposes
+// the trailer yaw rate: b_r2 = k_full * r2 with k_full < 0 (docs/3 5.5.1).
+// The kinematic filter has to learn that sign from the plant.
+void testTrailerYawResidualOpposesTrailerYawRate() {
+    auto p = parameters();
+    p.vx = 12.0;
+    const double l1 = p.a1 + p.b1;
+    const double l2 = p.a2 + p.b2;
+    const double kFull =
+        p.vx * p.vx / l2 *
+        (p.a2 * p.m2 / (l2 * p.c2r) -
+         (p.a1 * p.m1 * l2 + (p.a1 + p.d1) * p.b2 * p.m2) /
+             (l1 * l2 * p.c1r));
+    require(kFull < 0.0, "k_full must be negative for the nominal vehicle");
+
+    constexpr double dt = 0.01;
+    constexpr double steering = 0.01;
+    const auto discrete =
+        truck_model::discretizeZeroOrderHold(truck_model::buildDynamicModel(p), dt);
+    truck_model::Vector<4> state{};
+    truck_model::ArticulationEstimator estimator(p);
+    estimator.reset(0.0, 0.0);
+    for (int step = 1; step <= 3000; ++step) {
+        auto next = truck_model::multiply(discrete.a, state);
+        for (std::size_t i = 0; i < 4; ++i) {
+            next[i] += discrete.b[i] * steering;
+        }
+        state = next;
+        const double time = dt * static_cast<double>(step);
+        estimator.predict(steadyInputs(time, state[1], p.vx, steering));
+        if (step % 10 == 0) {
+            truck_model::ArticulationLidarMeasurement scan;
+            scan.stamp = time;
+            scan.articulation = state[3];
+            estimator.updateLidar(scan);
+        }
+    }
+
+    const double r1 = state[1];
+    const double r2 = state[2];
+    const double residual =
+        r2 - truck_model::kinematicTrailerYawRate(p, p.vx, r1, state[3]);
+    require(r2 > 0.0, "positive steering must give a left turn");
+    expectRelative(
+        residual / r2, kFull, 0.02, "steady residual must follow k_full * r2");
+    const double learned = estimator.estimate().trailerYawBias;
+    require(
+        learned < 0.0 && std::abs(learned - residual) < 0.05 * std::abs(residual),
+        "the kinematic filter must learn a residual that opposes r2");
 }
 
 // Truth for the latency benchmark comes from the (K27) plant, not from the
@@ -992,6 +1550,9 @@ struct PlantTrace {
     std::vector<double> articulation;
     std::vector<double> articulationRate;
     std::vector<double> truckYawRate;
+    // Steering held over the step that ends at time[i], i.e. the input a
+    // right-endpoint zero-order hold attaches to sample i.
+    std::vector<double> steering;
 };
 
 PlantTrace simulatePlant(
@@ -1008,6 +1569,7 @@ PlantTrace simulatePlant(
     trace.articulation.push_back(state[3]);
     trace.articulationRate.push_back(state[1] - state[2]);
     trace.truckYawRate.push_back(state[1]);
+    trace.steering.push_back(0.0);
     for (int step = 1; step <= steps; ++step) {
         const double time = dt * static_cast<double>(step);
         const double steering =
@@ -1022,6 +1584,7 @@ PlantTrace simulatePlant(
         trace.articulation.push_back(state[3]);
         trace.articulationRate.push_back(state[1] - state[2]);
         trace.truckYawRate.push_back(state[1]);
+        trace.steering.push_back(steering);
     }
     return trace;
 }
@@ -1079,6 +1642,7 @@ TrackingScore scoreEstimator(
         inputs.time = trace.time[index];
         inputs.truckYawRate = trace.truckYawRate[index];
         inputs.speed = plantParameters.vx;
+        inputs.steering = trace.steering[index];
         estimator.predict(inputs);
 
         if (index % 2 == 0 && index >= latencySteps) {
@@ -1243,6 +1807,17 @@ int main() {
     testNonFiniteInputsAreRejected();
     testReplaySpanIsCoastedWhenItExceedsLostTimeout();
     testSubFrameAlignmentIsExact();
+    testPredictBeforeResetThrows();
+    testResetRejectsInvalidCovariance();
+    testOlderInputThrows();
+    testSameTimePredictKeepsHistory();
+    testHardWindowAfterTimeJump();
+    testGatedSubFrameScanLeavesHistoryUntouched();
+    testUpdateRespectsMaximumFrames();
+    testCoastingFlagWithUnitNoiseScale();
+    testDelayedFusionEqualsOnTimeFusion();
+    testScheduledSpeedQuantization();
+    testTrailerYawResidualOpposesTrailerYawRate();
     testDynamicModelImprovesRateTracking();
     testDynamicModelSurvivesParameterMismatch();
     testBothModelsBeatDelayedMeasurement();

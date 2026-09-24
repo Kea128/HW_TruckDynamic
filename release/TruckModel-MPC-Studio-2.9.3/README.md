@@ -30,7 +30,7 @@ Windows 下额外构建实时可视化 `truck_mpc_demo`。
 ## 环境
 
 - Windows 10/11 或 Server，CMake ≥ 3.16，C++17 编译器（MSVC 或 MinGW-w64 GCC 均可；
-  2.9.2 的发布包用 GCC 13.2 构建）
+  2.9.3 的发布包用 GCC 13.2 构建）
 - 配置 Studio 时 CMake 会下载 ImGui v1.92.9、ImPlot v0.17（需能访问 GitHub）
 - 只编核心库、不编界面：`-DTRUCK_MODEL_BUILD_DEMO=OFF`
 - 编核心库与 Demo 会话、但跳过 ImGui 界面（无需 DirectX 或联网，可在 GCC/Clang 下跑全部测试）：
@@ -122,9 +122,10 @@ b 关闭时 MPC 吃的是 Plant 真值，滤波结果只进遥测和日志。
 - `mpc_horizon.csv`、`path.csv`
 
 接受率要用 `lidar_*_count` 逐包计数列，不要用布尔列 —— 一个控制拍可能处理多包，
-布尔列描述不了。`ekf_r2`、`ekf_r2_kin`、`ekf_b_r2` 三列恒满足
-\(\hat r_2=r_{2,\text{kin}}+\hat b_{r2}\)，可当日志自检
-（列的含义见融合文档 5.5.2，注意 `ekf_P_br2` 的语义随过程模型而变）。
+布尔列描述不了。开关 a 打开时，`ekf_r2`、`ekf_r2_kin`、`ekf_b_r2` 三列恒满足
+\(\hat r_2=r_{2,\text{kin}}+\hat b_{r2}\)，可当日志自检（a 关闭时 `ekf_r2` 填 Plant
+真值、另两列为 0，恒等式不成立；列的含义见融合文档 5.5.2，注意 `ekf_P_br2` 的语义
+随过程模型而变）。
 `shadow_*` 那几列表头始终存在；c 关闭时它们只是与主滤波器同值，不是缺列。
 该目录是运行产物，不要提交 git。
 
@@ -134,10 +135,11 @@ b 关闭时 MPC 吃的是 Plant 真值，滤波结果只进遥测和日志。
 **铰接角跟踪实验**会把路径权重置零，让转角去跟 \(\phi_{\mathrm{ref}}\)。
 
 **不要用它当融合验收。** 开关 b 打开时，这条闭环会把估计器的幅值偏差放大成
-Plant 的真实超调：运动学模型的估计只读到真值的 0.866，控制器把估计压到参考，
-真实铰接角就被抬到参考的 \(1/0.866=1.156\) 倍。b 关闭时同一滤波器的偏差不变，
+Plant 的真实超调：运动学模型的估计只读到真值的 0.865，控制器把估计压到参考，
+真实铰接角就被抬到参考的 \(1/0.865=1.156\) 倍。b 关闭时同一滤波器的偏差不变，
 但 Plant 完全不超调（0.992）。也就是说这个实验测的是"估计器偏差 × 控制器增益"，
-不是估计精度。验收要用 b 关闭的开环配置（融合文档 14.2）。路径跟踪不受影响。
+不是估计精度（融合文档 14.2）。验收要用 b 关闭的开环配置（融合文档 14.1）。
+路径跟踪不受影响。
 
 ## 库用法
 
@@ -174,22 +176,23 @@ truck_model::ArticulationEstimatorConfig cfg;
 // >= 滤波器可见的最大扫描年龄 + 2 个控制周期（融合文档 9.6）
 cfg.historyHorizon = 0.55;
 cfg.measurementVariance = sigma * sigma;   // 雷达噪声 rad²
-// 默认 kinematic：只需轴距，不受载重影响。载荷参数可信时可换 dynamic，
+// 默认 kinematic：过程方程只用几何尺寸，不受载重影响（configure 仍会校验完整的
+// Parameters，质量、惯量、刚度要填合法值）。载荷参数可信时可换 dynamic，
 // 它的 phiDot 明显更准，代价是对 m2/I2/C2r 敏感（融合文档第 4、6 章）。
 cfg.processModel = truck_model::ArticulationProcessModel::kinematic;
 truck_model::ArticulationEstimator ekf(p, cfg);
-ekf.reset(t0, phi0);
+ekf.reset(t0, phi0);   // 必须先 reset，未 reset 就 predict 会抛 logic_error
 
-// 每个 IMU/控制拍（≥20 Hz）
+// 每个 IMU/控制拍（≥20 Hz）；时间不得倒退，否则抛 invalid_argument
 truck_model::ArticulationInputs u;
 u.time = t; u.truckYawRate = r1_imu; u.speed = U; u.steering = delta;
 ekf.predict(u);
 
-// 雷达到达时：stamp 必须是扫描时刻，不是到达时刻
+// 雷达到达时（同一拍内放在 predict 之后）：stamp 必须是扫描时刻，不是到达时刻
 truck_model::ArticulationLidarMeasurement z;
 z.stamp = t_scan;
 z.articulation = phi_lidar;  // rad
-ekf.updateLidar(z);
+ekf.updateLidar(z);          // 坏包返回结局码，不抛异常
 
 const auto& e = ekf.estimate();
 // e.articulation, e.articulationRate  → 写入 MPC 的 xc[4], xc[5]
@@ -199,10 +202,13 @@ const auto& e = ekf.estimate();
 注意是实际误差而不是传感器噪声，两者在下面这种情况下差很多。
 
 > **移植第一件事：确认你拿不拿得到可信的逐帧扫描时间戳。**
-> 拿得到，上面的代码直接可用；拿不到（只知道时延大致范围），就得用
-> `stamp = 到达时刻 - 标称时延` 合成，此时残余定时误差会成为主导误差源，
-> 且必须把 \(R\) 按 \(\dot\phi^2\sigma_\varepsilon^2\) 膨胀，否则转弯时扫描会被
-> 马氏门限批量误拒。这一项本库**未实现**，见融合文档第 9.7 节。
+> 拿得到，上面的代码直接可用。拿不到（只知道时延大致范围），就不能只在回调里
+> 减一个常数、再沿用固定的 \(R\)：最低做法是以 `到达时刻 - 标称时延` 为锚点，在该
+> 历史点的更新前先验上按融合文档 (F22) 做定时量测更新。标称时延已离线标定到
+> 残余均值约为 0 时，这一步只是把 \(R\) 换成有效方差；否则还要修正预测量测和量测
+> 雅可比。若能拿到帧序号或未同步的源时间戳，应优先重建扫描时间网格，逐帧抖动可以
+> 降一个数量级；公共偏移仍需最小时延等先验来锚定。这些情况 B 能力本库**都未实现**，
+> 完整设计与原型数据见融合文档第 18 章。
 
 完整公式、门限、coasting、移植清单：[`docs/3_articulation_fusion_filter.md`](docs/3_articulation_fusion_filter.md)。
 

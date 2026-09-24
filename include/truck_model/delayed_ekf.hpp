@@ -18,9 +18,9 @@ namespace truck_model {
 enum class MeasurementOutcome {
     accepted,
     gated,             // Mahalanobis test rejected the innovation
-    duplicate,         // same scan stamp as the previous measurement
-    outOfOrder,        // scan stamp older than one already fused
-    staleBeyondWindow, // scan stamp older than the retained history
+    duplicate,         // same stamp as the last processed scan
+    outOfOrder,        // stamp older than the last processed scan
+    staleBeyondWindow, // stamp older than the history or historyHorizon
     aheadOfInputs,     // scan stamp newer than the newest input sample
     notInitialized,
     nonFinite
@@ -108,9 +108,10 @@ struct DelayedEkfLimits {
 // later measurements too, which needs a full event log.
 //
 // Rather than assume silently, the shell checks. A stamp at or before the last
-// fused one is rejected and reported as `outOfOrder` or `duplicate`. A pipeline
-// that violates the assumption therefore shows up as a visible counter instead
-// of a quietly corrupted state.
+// one that passed the order and window checks, a gated scan included, is
+// rejected and reported as `outOfOrder` or `duplicate`. A pipeline that
+// violates the assumption therefore shows up as a visible counter instead of a
+// quietly corrupted state.
 //
 // Model requirements:
 //   static constexpr std::size_t kStateSize
@@ -170,11 +171,32 @@ public:
                     "estimator reset state must be finite");
             }
         }
+        for (std::size_t row = 0; row < kStateSize; ++row) {
+            for (std::size_t column = 0; column < kStateSize; ++column) {
+                const double value = covariance[row][column];
+                const double mirror = covariance[column][row];
+                if (!std::isfinite(value)) {
+                    throw std::invalid_argument(
+                        "estimator reset covariance must be finite");
+                }
+                if (std::abs(value - mirror) >
+                    kSymmetryTolerance *
+                        std::max({1.0, std::abs(value), std::abs(mirror)})) {
+                    throw std::invalid_argument(
+                        "estimator reset covariance must be symmetric");
+                }
+            }
+            if (covariance[row][row] < 0.0) {
+                throw std::invalid_argument(
+                    "estimator reset covariance diagonal must be >= 0");
+            }
+        }
         Frame anchor;
         anchor.time = time;
         anchor.inputs = inputs;
         anchor.state = state;
         anchor.covariance = covariance;
+        symmetrize(anchor.covariance);
         model_.normalize(anchor.state);
         frames_.clear();
         frames_.push_back(anchor);
@@ -185,16 +207,20 @@ public:
         initialized_ = true;
     }
 
-    // Advances the filter to `time`. Samples that are not newer than the newest
-    // frame only refresh the governing input; they never rewind time.
+    // Advances the filter to `time`. Input time may not run backwards. A sample
+    // at the newest frame's time changes nothing: that frame was already
+    // propagated with the input it stores, and rewriting the input would make
+    // a later replay diverge from the forward pass.
     void predict(const Inputs& inputs, double time) {
         requireInitialized();
         if (!std::isfinite(time)) {
             throw std::invalid_argument("estimator input time must be finite");
         }
-        Frame& newest = frames_.back();
-        if (time <= newest.time + 1.0e-15) {
-            newest.inputs = inputs;
+        const Frame& newest = frames_.back();
+        if (time < newest.time - kSameTimeTolerance) {
+            throw std::invalid_argument("estimator input time went backwards");
+        }
+        if (time <= newest.time + kSameTimeTolerance) {
             return;
         }
 
@@ -203,12 +229,7 @@ public:
         next.inputs = inputs;
         next.state = newest.state;
         next.covariance = newest.covariance;
-        model_.propagate(
-            next.state,
-            next.covariance,
-            inputs,
-            time - newest.time,
-            noiseScale(newest.time));
+        propagateFrom(next, newest.time);
         frames_.push_back(next);
         trim();
     }
@@ -234,12 +255,16 @@ public:
             registerRejection();
             return report;
         }
-        if (stamp < frames_.front().time - 1.0e-9) {
+        // The age bound matters after a time jump: trim() always keeps two
+        // frames, so the oldest frame alone would admit arbitrarily old stamps.
+        if (stamp < frames_.front().time - kWindowTolerance ||
+            stamp < frames_.back().time - limits_.historyHorizon -
+                        kWindowTolerance) {
             report.outcome = MeasurementOutcome::staleBeyondWindow;
             registerRejection();
             return report;
         }
-        if (stamp > frames_.back().time + 1.0e-9) {
+        if (stamp > frames_.back().time + kWindowTolerance) {
             // No input covers this stamp yet. Call predict() first; extending
             // the newest input past its sample would fabricate information.
             report.outcome = MeasurementOutcome::aheadOfInputs;
@@ -248,12 +273,30 @@ public:
 
         lastMeasurementStamp_ = stamp;
 
-        const std::size_t index = locateFrame(stamp);
-        report.alignedStamp = frames_[index].time;
-        applyMeasurement(frames_[index], value, report);
-        if (report.outcome == MeasurementOutcome::accepted) {
-            report.repropagatedFrames = repropagateFrom(index);
+        const Target target = locateTarget(stamp);
+        if (!target.split) {
+            Frame& frame = frames_[target.index];
+            report.alignedStamp = frame.time;
+            applyMeasurement(frame, value, report);
+            if (report.outcome == MeasurementOutcome::accepted) {
+                report.repropagatedFrames = repropagateFrom(target.index);
+            }
+            return report;
         }
+
+        // Gate on a detached split frame, so that a rejected scan leaves the
+        // history exactly as it was.
+        Frame inserted = splitFrame(target.index, stamp);
+        report.alignedStamp = inserted.time;
+        applyMeasurement(inserted, value, report);
+        if (report.outcome != MeasurementOutcome::accepted) {
+            return report;
+        }
+        frames_.insert(
+            frames_.begin() + static_cast<std::ptrdiff_t>(target.index),
+            inserted);
+        report.repropagatedFrames = repropagateFrom(target.index);
+        enforceFrameLimit();
         return report;
     }
 
@@ -262,9 +305,6 @@ public:
         return frames_.back().covariance;
     }
     [[nodiscard]] double time() const { return frames_.back().time; }
-    [[nodiscard]] const Inputs& latestInputs() const {
-        return frames_.back().inputs;
-    }
     [[nodiscard]] double lastAcceptedStamp() const { return lastAcceptedStamp_; }
     [[nodiscard]] bool everAccepted() const { return everAccepted_; }
     [[nodiscard]] int consecutiveRejects() const { return consecutiveRejects_; }
@@ -274,7 +314,7 @@ public:
         return frames_.back().time - lastAcceptedStamp_;
     }
     [[nodiscard]] bool coasting() const {
-        return noiseScale(frames_.back().time) > 1.0;
+        return openLoop(frames_.back().time);
     }
     [[nodiscard]] std::size_t frameCount() const { return frames_.size(); }
     [[nodiscard]] bool initialized() const { return initialized_; }
@@ -283,11 +323,28 @@ public:
     [[nodiscard]] const DelayedEkfLimits& limits() const { return limits_; }
 
 private:
+    // An input sample within this of the newest frame is the same instant.
+    static constexpr double kSameTimeTolerance = 1.0e-15;
+    // Window slack at both ends. A stamp inside the slack but outside the
+    // stored span is fused at the end frame, at most this far from the stamp.
+    static constexpr double kWindowTolerance = 1.0e-9;
+    // A stamp this close to a stored frame is fused there instead of splitting.
+    static constexpr double kFrameMatchTolerance = 1.0e-12;
+    static constexpr double kSpanTolerance = 1.0e-12;
+    static constexpr double kSymmetryTolerance = 1.0e-9;
+
     struct Frame {
         double time{};
         Inputs inputs{};
         State state{};
         Covariance covariance{};
+    };
+
+    struct Target {
+        // Frame to update, or the insertion position when the interval before
+        // it has to be split at the stamp.
+        std::size_t index{};
+        bool split{};
     };
 
     void requireConfigured() const {
@@ -303,19 +360,45 @@ private:
         }
     }
 
+    // Evaluated at the left end of every propagated interval. The reject count
+    // takes effect when a rejection is processed, not at the rejected stamp.
+    [[nodiscard]] bool openLoop(double time) const {
+        return time - lastAcceptedStamp_ > limits_.lostTimeout ||
+               consecutiveRejects_ >= limits_.consecutiveRejectLimit;
+    }
+
     [[nodiscard]] double noiseScale(double time) const {
-        const bool stale = time - lastAcceptedStamp_ > limits_.lostTimeout;
-        const bool rejecting =
-            consecutiveRejects_ >= limits_.consecutiveRejectLimit;
-        return (stale || rejecting) ? limits_.coastingProcessNoiseScale : 1.0;
+        return openLoop(time) ? limits_.coastingProcessNoiseScale : 1.0;
     }
 
     void registerRejection() { ++consecutiveRejects_; }
 
-    // Returns the index of the frame the update is applied to. By default the
-    // interval containing the stamp is split so the update lands exactly on it;
-    // the legacy mode snaps to the closest existing frame instead.
-    [[nodiscard]] std::size_t locateFrame(double stamp) {
+    static void symmetrize(Covariance& covariance) {
+        for (std::size_t row = 0; row < kStateSize; ++row) {
+            for (std::size_t column = row + 1; column < kStateSize; ++column) {
+                const double mean =
+                    0.5 * (covariance[row][column] + covariance[column][row]);
+                covariance[row][column] = mean;
+                covariance[column][row] = mean;
+            }
+        }
+    }
+
+    // `frame` holds the posterior at `fromTime` on entry and the prior at
+    // frame.time on exit, propagated with the input the frame stores.
+    void propagateFrom(Frame& frame, double fromTime) const {
+        model_.propagate(
+            frame.state,
+            frame.covariance,
+            frame.inputs,
+            frame.time - fromTime,
+            noiseScale(fromTime));
+        symmetrize(frame.covariance);
+    }
+
+    // By default the interval containing the stamp is split so the update
+    // lands exactly on it; the legacy mode snaps to the closest frame instead.
+    [[nodiscard]] Target locateTarget(double stamp) const {
         if (limits_.snapToNearestFrame) {
             std::size_t best = 0;
             double bestGap = std::abs(frames_.front().time - stamp);
@@ -326,7 +409,7 @@ private:
                     best = i;
                 }
             }
-            return best;
+            return {best, false};
         }
 
         std::size_t after = frames_.size();
@@ -337,53 +420,46 @@ private:
             }
         }
         if (after == 0) {
-            return 0;
+            return {0, false};
         }
         if (after == frames_.size()) {
             // Stamp is at or after the newest frame; the window check already
             // bounded how far past it can be.
-            return frames_.size() - 1;
+            return {frames_.size() - 1, false};
         }
-        if (std::abs(frames_[after - 1].time - stamp) <= 1.0e-12) {
-            return after - 1;
+        if (std::abs(frames_[after - 1].time - stamp) <= kFrameMatchTolerance) {
+            return {after - 1, false};
         }
+        if (std::abs(frames_[after].time - stamp) <= kFrameMatchTolerance) {
+            return {after, false};
+        }
+        return {after, true};
+    }
 
-        // Split the interval. Both halves keep the input that governed the
-        // original interval, so the split does not change input semantics.
+    // Both halves keep the input that governed the original interval, so the
+    // split does not change input semantics.
+    [[nodiscard]] Frame splitFrame(std::size_t after, double stamp) const {
         Frame inserted;
         inserted.time = stamp;
         inserted.inputs = frames_[after].inputs;
         inserted.state = frames_[after - 1].state;
         inserted.covariance = frames_[after - 1].covariance;
-        model_.propagate(
-            inserted.state,
-            inserted.covariance,
-            inserted.inputs,
-            stamp - frames_[after - 1].time,
-            noiseScale(frames_[after - 1].time));
-        frames_.insert(
-            frames_.begin() + static_cast<std::ptrdiff_t>(after), inserted);
-        return after;
+        propagateFrom(inserted, frames_[after - 1].time);
+        return inserted;
     }
 
     std::size_t repropagateFrom(std::size_t index) {
         std::size_t touched = 0;
         for (std::size_t i = index; i + 1 < frames_.size(); ++i) {
-            const double dt = frames_[i + 1].time - frames_[i].time;
             frames_[i + 1].state = frames_[i].state;
             frames_[i + 1].covariance = frames_[i].covariance;
-            if (dt > 0.0) {
-                model_.propagate(
-                    frames_[i + 1].state,
-                    frames_[i + 1].covariance,
-                    frames_[i + 1].inputs,
-                    dt,
-                    // The span from the corrected frame to now carries no
-                    // further measurement, so it is still open loop. The
-                    // update has already moved lastAcceptedStamp_ to the scan
-                    // instant, so this measures age since the correction,
-                    // which is exactly the right clock for the replay.
-                    noiseScale(frames_[i].time));
+            if (frames_[i + 1].time - frames_[i].time > 0.0) {
+                // The span from the corrected frame to now carries no further
+                // measurement, so it is still open loop. The update has already
+                // moved lastAcceptedStamp_ to the scan instant, so the noise
+                // scale measures age since the correction, which is exactly
+                // the right clock for the replay.
+                propagateFrom(frames_[i + 1], frames_[i].time);
             }
             ++touched;
         }
@@ -451,14 +527,7 @@ private:
                 updated[row][column] += gain[row] * variance * gain[column];
             }
         }
-        for (std::size_t row = 0; row < kStateSize; ++row) {
-            for (std::size_t column = row + 1; column < kStateSize; ++column) {
-                const double mean =
-                    0.5 * (updated[row][column] + updated[column][row]);
-                updated[row][column] = mean;
-                updated[column][row] = mean;
-            }
-        }
+        symmetrize(updated);
         frame.covariance = updated;
 
         lastAcceptedStamp_ = frame.time;
@@ -471,9 +540,13 @@ private:
     void trim() {
         while (frames_.size() > 2 &&
                frames_.back().time - frames_.front().time >
-                   limits_.historyHorizon + 1.0e-12) {
+                   limits_.historyHorizon + kSpanTolerance) {
             frames_.pop_front();
         }
+        enforceFrameLimit();
+    }
+
+    void enforceFrameLimit() {
         while (frames_.size() > limits_.maximumFrames) {
             frames_.pop_front();
         }

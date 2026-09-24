@@ -93,8 +93,22 @@ std::string ArticulationEstimatorConfig::validationError() const {
     if (consecutiveRejectLimit < 1) {
         errors << "consecutiveRejectLimit must be >= 1; ";
     }
+    if (!(coastingProcessNoiseScale >= 1.0) ||
+        !std::isfinite(coastingProcessNoiseScale)) {
+        errors << "coastingProcessNoiseScale must be finite and >= 1; ";
+    }
+    if (maximumFrames < 2) {
+        errors << "maximumFrames must be >= 2; ";
+    }
     errors << noiseDensity.validationError();
     return errors.str();
+}
+
+double scheduledModelSpeed(
+    double speed,
+    const ArticulationEstimatorConfig& config) {
+    const double step = config.modelRefreshSpeedStep;
+    return std::max(config.minimumModelSpeed, step * std::round(speed / step));
 }
 
 double kinematicTrailerYawRate(
@@ -222,9 +236,8 @@ DynamicArticulationModel::DynamicArticulationModel(
     : parameters_(std::move(parameters)), config_(std::move(config)) {}
 
 void DynamicArticulationModel::refresh(double speed) const {
-    const double scheduled = std::max(speed, config_.minimumModelSpeed);
-    if (scheduledSpeed_ > 0.0 &&
-        std::abs(scheduled - scheduledSpeed_) < config_.modelRefreshSpeedStep) {
+    const double scheduled = scheduledModelSpeed(speed, config_);
+    if (scheduled == scheduledSpeed_) {
         return;
     }
 
@@ -361,8 +374,10 @@ struct ArticulationEstimator::Impl {
     DelayedEkf<KinematicArticulationModel> kinematic;
     DelayedEkf<DynamicArticulationModel> dynamic;
     ArticulationEstimate estimate{};
+    // Newest input sample, including a same-time refresh that the shell does
+    // not store. Only the published rate and residual read it.
+    ArticulationInputs latestInputs{};
     double lastAcceptedArrival{0.0};
-    bool everAcceptedArrival{false};
     double resetTime{0.0};
 
     [[nodiscard]] bool useDynamic() const {
@@ -375,10 +390,23 @@ struct ArticulationEstimator::Impl {
         value.mahalanobisGate = config.mahalanobisGate;
         value.consecutiveRejectLimit = config.consecutiveRejectLimit;
         value.lostTimeout = config.lostTimeout;
+        value.coastingProcessNoiseScale = config.coastingProcessNoiseScale;
+        value.maximumFrames = config.maximumFrames;
+        value.snapToNearestFrame = config.snapToNearestFrame;
         return value;
     }
 
-    void publish(const ArticulationInputs& inputs, double time) {
+    [[nodiscard]] double filterTime() const {
+        return useDynamic() ? dynamic.time() : kinematic.time();
+    }
+
+    [[nodiscard]] bool everAccepted() const {
+        return useDynamic() ? dynamic.everAccepted() : kinematic.everAccepted();
+    }
+
+    void publish() {
+        const ArticulationInputs& inputs = latestInputs;
+        const double time = filterTime();
         double articulation = 0.0;
         double trailerRate = 0.0;
         double trailerBias = 0.0;
@@ -447,8 +475,10 @@ struct ArticulationEstimator::Impl {
         estimate.consecutiveRejects = rejects;
         estimate.historySize = historySize;
         estimate.coasting = coasting;
-        estimate.arrivalGap =
-            everAcceptedArrival ? time - lastAcceptedArrival : time - resetTime;
+        estimate.hasAcceptedMeasurement = everAccepted();
+        estimate.arrivalGap = estimate.hasAcceptedMeasurement
+                                  ? time - lastAcceptedArrival
+                                  : time - resetTime;
         estimate.linkStalled = estimate.arrivalGap > config.linkTimeout;
     }
 };
@@ -484,7 +514,6 @@ void ArticulationEstimator::configure(
     impl_->configured = true;
     impl_->initialized = false;
     impl_->estimate = {};
-    impl_->everAcceptedArrival = false;
 
     if (impl_->useDynamic()) {
         impl_->dynamic.configure(
@@ -528,16 +557,22 @@ void ArticulationEstimator::reset(double time, double articulation) {
     impl_->initialized = true;
     impl_->resetTime = time;
     impl_->lastAcceptedArrival = time;
-    impl_->everAcceptedArrival = false;
+    impl_->latestInputs = inputs;
     impl_->estimate = {};
     impl_->estimate.lastAcceptedStamp = time;
-    impl_->publish(inputs, time);
+    impl_->publish();
 }
 
 ArticulationEstimate ArticulationEstimator::predict(
     const ArticulationInputs& inputs) {
     if (!impl_->configured) {
         throw std::logic_error("ArticulationEstimator is not configured");
+    }
+    // Starting from an invented articulation would look like a valid estimate,
+    // so the initial state has to be chosen explicitly.
+    if (!impl_->initialized) {
+        throw std::logic_error(
+            "ArticulationEstimator is not initialized; call reset() first");
     }
     // Steering belongs in this check: the dynamic model multiplies it into the
     // state, and both models feed it through tan() for the yaw residual, so a
@@ -546,21 +581,19 @@ ArticulationEstimate ArticulationEstimator::predict(
         !std::isfinite(inputs.speed) || !std::isfinite(inputs.steering)) {
         throw std::invalid_argument("estimator inputs must be finite");
     }
-    if (!impl_->initialized) {
-        reset(inputs.time, 0.0);
-    }
 
     if (impl_->useDynamic()) {
         impl_->dynamic.predict(inputs, inputs.time);
     } else {
         impl_->kinematic.predict(inputs, inputs.time);
     }
+    impl_->latestInputs = inputs;
 
     impl_->estimate.outcome = MeasurementOutcome::notInitialized;
     impl_->estimate.measurementAccepted = false;
     impl_->estimate.measurementGated = false;
     impl_->estimate.repropagatedFrames = 0;
-    impl_->publish(inputs, inputs.time);
+    impl_->publish();
     return impl_->estimate;
 }
 
@@ -596,8 +629,6 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
         return impl_->estimate;
     }
 
-    ArticulationInputs inputs;
-    double now = 0.0;
     MeasurementOutcome outcome = MeasurementOutcome::notInitialized;
     double innovation = 0.0;
     double innovationCovariance = 0.0;
@@ -618,8 +649,6 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
         repropagated = report.repropagatedFrames;
         gainPhi = report.gain[2];
         gainBias = report.gain[1];
-        inputs = impl_->dynamic.latestInputs();
-        now = impl_->dynamic.time();
     } else {
         const auto report = impl_->kinematic.update(
             measurement.stamp, measurement.articulation);
@@ -631,16 +660,13 @@ ArticulationEstimate ArticulationEstimator::updateLidar(
         repropagated = report.repropagatedFrames;
         gainPhi = report.gain[0];
         gainBias = report.gain[1];
-        inputs = impl_->kinematic.latestInputs();
-        now = impl_->kinematic.time();
     }
 
     if (outcome == MeasurementOutcome::accepted) {
-        impl_->lastAcceptedArrival = now;
-        impl_->everAcceptedArrival = true;
+        impl_->lastAcceptedArrival = impl_->filterTime();
     }
 
-    impl_->publish(inputs, now);
+    impl_->publish();
     impl_->estimate.outcome = outcome;
     impl_->estimate.measurementAccepted =
         outcome == MeasurementOutcome::accepted;

@@ -47,12 +47,14 @@ struct ArticulationNoiseDensities {
     // Speed sensor noise entering phiDot. [m^2/s]
     double speed{0.04};
     // Truck lateral-velocity excitation, dynamic model only. [m^2/s^3]
-    // Sized from an unmodelled lateral acceleration of about 0.3 m/s^2 with a
-    // 0.2 s correlation time: 0.3^2 * 2 * 0.2 = 0.036.
+    // An unmodelled lateral acceleration of about 0.3 m/s^2 with a 0.2 s
+    // correlation time gives 2 * 0.3^2 * 0.2 = 0.036; the default carries
+    // about 40 % margin on top of that.
     double truckLateralVelocity{0.05};
     // Trailer yaw-rate excitation, dynamic model only. [rad^2/s^3]
-    // Sized from an unmodelled trailer yaw acceleration of about 1 deg/s^2 with
-    // a 0.2 s correlation time: 0.0175^2 * 2 * 0.2 = 1.2e-4.
+    // An unmodelled trailer yaw acceleration of about 1 deg/s^2 with a 0.2 s
+    // correlation time gives 2 * 0.0175^2 * 0.2 = 1.2e-4; the default carries
+    // about 25 % margin on top of that.
     double trailerYawRate{1.5e-4};
 
     [[nodiscard]] std::string validationError() const;
@@ -74,15 +76,23 @@ struct ArticulationEstimatorConfig {
     int consecutiveRejectLimit{3};
     // Information-age threshold for inflating the process noise.
     double lostTimeout{0.6};
-    // Arrival-gap threshold for the link-health diagnostic only.
+    // Multiplies the articulation-rate density while the filter runs open
+    // loop. 1 disables the inflation but not the coasting flag.
+    double coastingProcessNoiseScale{4.0};
+    // Threshold on arrivalGap for the linkStalled diagnostic only.
     double linkTimeout{0.5};
+    // Hard cap on stored frames, on top of the historyHorizon span.
+    std::size_t maximumFrames{4096};
+    // Legacy mode: fuse at the nearest stored frame instead of at the stamp.
+    bool snapToNearestFrame{false};
 
-    double initialArticulationVariance{1.2180736252517745e-3};
-    double initialTrailerYawBiasVariance{1.2180736252517745e-3};
+    double initialArticulationVariance{1.2184696791468343e-3};
+    double initialTrailerYawBiasVariance{1.2184696791468343e-3};
     double initialTruckLateralVelocityVariance{0.25};
-    double initialTrailerYawRateVariance{1.2180736252517745e-3};
+    double initialTrailerYawRateVariance{1.2184696791468343e-3};
 
-    // Rebuild the speed-scheduled (K27) matrices once the speed moves this far.
+    // The (K27) matrices are built for a quantized speed; see
+    // scheduledModelSpeed().
     double modelRefreshSpeedStep{0.25};
     double minimumModelSpeed{0.5};
 
@@ -112,17 +122,23 @@ struct ArticulationEstimate {
     bool measurementAccepted{};
     bool measurementGated{};
     // Running open loop: either the newest fused scan is older than
-    // lostTimeout, or consecutiveRejectLimit scans in a row were refused.
+    // lostTimeout, or consecutiveRejects has reached consecutiveRejectLimit.
     bool coasting{};
-    // Link health: nothing has been fused for longer than linkTimeout of wall
-    // clock. Distinct from coasting, which measures information age.
+    // arrivalGap exceeds linkTimeout. Gated and out-of-order scans do not reset
+    // it, so this flags "nothing fused for a while", whatever the cause.
     bool linkStalled{};
+    // False until the first scan is accepted after reset. Until then
+    // informationAge and arrivalGap count from the reset instant.
+    bool hasAcceptedMeasurement{};
     double lastAcceptedStamp{};
     double alignedStamp{};
     // Age of the newest fused scan, in seconds.
     double informationAge{};
-    // Wall-clock time since the last accepted update, in seconds.
+    // Filter time since the last accepted update, in seconds. The filter clock
+    // is the newest input time, not the packet arrival time.
     double arrivalGap{};
+    // Rejections counted since the last accepted scan: outOfOrder,
+    // staleBeyondWindow and gated. Other outcomes neither count nor reset it.
     int consecutiveRejects{};
     std::size_t historySize{};
     std::size_t repropagatedFrames{};
@@ -135,6 +151,13 @@ struct ArticulationEstimate {
     double speed,
     double truckYawRate,
     double articulation);
+
+// Speed the dynamic model is built for:
+// max(minimumModelSpeed, step * round(speed / step)). A pure function of the
+// sample, so a replay rebuilds exactly the matrices of the forward pass.
+[[nodiscard]] double scheduledModelSpeed(
+    double speed,
+    const ArticulationEstimatorConfig& config);
 
 // Two-state (K5) process model: x = [phi, b_r2].
 class KinematicArticulationModel {
@@ -210,8 +233,7 @@ private:
 
     Parameters parameters_{};
     ArticulationEstimatorConfig config_{};
-    // Speed-scheduled (K27) coefficients, rebuilt when the speed moves past
-    // modelRefreshSpeedStep.
+    // Coefficients cached for the last scheduled speed.
     mutable double scheduledSpeed_{-1.0};
     mutable Matrix<kStateSize, kStateSize> continuous_{};
     mutable Vector<kStateSize> inputYawRate_{};

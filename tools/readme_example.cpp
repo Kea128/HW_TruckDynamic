@@ -14,7 +14,7 @@ truck_model::Parameters demoParameters() {
     p.m1 = 8000; p.iz1 = 25000; p.a1 = 1.5; p.b1 = 2.5;
     p.c1f = 220000; p.c1r = 300000;
     p.m2 = 18000; p.iz2 = 140000; p.a2 = 4; p.b2 = 3; p.c2r = 500000;
-    p.d1 = p.b1;   // 铰接点在后轴，(K5)->(K6)
+    p.d1 = p.b1;   // 铰接点在后轴，(K5)→(K6)
     p.vx = 15;
     return p;
 }
@@ -40,17 +40,20 @@ void delayedEkf() {
     const double sigma = 0.0087;
 
     truck_model::ArticulationEstimatorConfig cfg;
-    // >= 可见最大扫描年龄 + 2 个控制周期（融合文档 9.6）
+    // >= 滤波器可见的最大扫描年龄 + 2 个控制周期（融合文档 9.6）
     cfg.historyHorizon = 0.55;
     cfg.measurementVariance = sigma * sigma;   // 雷达噪声 rad^2
+    // 默认 kinematic：过程方程只用几何尺寸，不受载重影响（configure 仍会校验完整的
+    // Parameters，质量、惯量、刚度要填合法值）。载荷参数可信时可换 dynamic，
+    // 它的 phiDot 明显更准，代价是对 m2/I2/C2r 敏感（融合文档第 4、6 章）。
     cfg.processModel = truck_model::ArticulationProcessModel::kinematic;
     truck_model::ArticulationEstimator ekf(p, cfg);
 
     const double t0 = 0.0;
     const double phi0 = 0.0;
-    ekf.reset(t0, phi0);
+    ekf.reset(t0, phi0);   // 必须先 reset，未 reset 就 predict 会抛 logic_error
 
-    // 每个 IMU/控制拍（>=20 Hz）
+    // 每个 IMU/控制拍（>=20 Hz）；时间不得倒退，否则抛 invalid_argument
     for (int k = 1; k <= 20; ++k) {
         truck_model::ArticulationInputs u;
         u.time = 0.05 * k;
@@ -59,17 +62,17 @@ void delayedEkf() {
         u.steering = 0.02;
         ekf.predict(u);
 
-        // 雷达到达时：stamp 必须是扫描时刻，不是到达时刻
+        // 雷达到达时（同一拍内放在 predict 之后）：stamp 必须是扫描时刻，不是到达时刻
         if (k % 2 == 0) {
             truck_model::ArticulationLidarMeasurement z;
             z.stamp = u.time - 0.1;
             z.articulation = 0.01;  // rad
-            ekf.updateLidar(z);
+            ekf.updateLidar(z);     // 坏包返回结局码，不抛异常
         }
     }
 
     const auto& e = ekf.estimate();
-    // e.articulation, e.articulationRate -> 写入 MPC 的 xc[4], xc[5]
+    // e.articulation, e.articulationRate  → 写入 MPC 的 xc[4], xc[5]
     std::printf("phi = %.6f rad, phiDot = %.6f rad/s\n",
                 e.articulation, e.articulationRate);
 }

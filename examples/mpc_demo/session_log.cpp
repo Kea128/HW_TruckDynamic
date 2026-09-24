@@ -182,7 +182,11 @@ std::string settingsText(const DemoSession& session) {
     writeKey(out, "ekf.mahalanobisGate", ekf.mahalanobisGate);
     writeKey(out, "ekf.consecutiveRejectLimit", ekf.consecutiveRejectLimit);
     writeKey(out, "ekf.lostTimeout", ekf.lostTimeout);
+    writeKey(
+        out, "ekf.coastingProcessNoiseScale", ekf.coastingProcessNoiseScale);
     writeKey(out, "ekf.linkTimeout", ekf.linkTimeout);
+    writeKey(out, "ekf.maximumFrames", ekf.maximumFrames);
+    writeKey(out, "ekf.snapToNearestFrame", ekf.snapToNearestFrame);
     writeKey(
         out,
         "ekf.initialArticulationVariance",
@@ -233,7 +237,7 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
         << "ekf_history_size,ekf_replayed,ekf_aligned_stamp,"
         << "ekf_last_accepted_stamp,ekf_information_age,ekf_arrival_gap,"
         << "ekf_consecutive_rejects,ekf_accepted,ekf_gated,ekf_coasting,"
-        << "ekf_link_stalled,ekf_outcome,"
+        << "ekf_link_stalled,ekf_has_accepted,ekf_outcome,"
         << "shadow_phi,shadow_phi_dot,shadow_r2,shadow_b_r2,shadow_P_phi,"
         << "sensed_r1,sensed_speed,"
         << "lidar_z,lidar_stamp,lidar_delay,lidar_queue,lidar_delivered,"
@@ -281,6 +285,7 @@ void writeTimeseries(std::ostream& out, const DemoSession& session) {
             << (e.measurementGated ? 1 : 0) << ','
             << (e.coasting ? 1 : 0) << ','
             << (e.linkStalled ? 1 : 0) << ','
+            << (e.hasAcceptedMeasurement ? 1 : 0) << ','
             << truck_model::measurementOutcomeName(e.outcome) << ','
             << sample.shadowArticulation << ','
             << sample.shadowArticulationRate << ','
@@ -349,9 +354,10 @@ Shadow model (second estimator, never drives the controller):
 Filter health:
   ekf_innovation, ekf_S, ekf_mahalanobis
   ekf_information_age   age of the newest fused scan
-  ekf_arrival_gap       wall-clock time since the last accepted update
-  ekf_coasting          open loop, derived from information age
-  ekf_link_stalled      link health, derived from arrival gap
+  ekf_arrival_gap       filter time since the last accepted update
+  ekf_coasting          open loop: information age or counted rejections
+  ekf_link_stalled      arrival gap above linkTimeout, whatever the cause
+  ekf_has_accepted      0 until the first scan is accepted after reset
   ekf_replayed          timeline entries recomputed by the last update
 
 Lidar packets. The *_count columns are per control step; a step can service
